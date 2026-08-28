@@ -2,8 +2,6 @@
 
 Proyecto Integrador I: plataforma para predecir el abandono de clientes (churn) usando el dataset IBM Telco Customer Churn. Compara varios modelos de aprendizaje automático y expone las predicciones mediante una API y un dashboard.
 
-> ⚠️ Proyecto en etapa inicial. Aún no hay código implementado.
-
 ## Estructura
 
 ```
