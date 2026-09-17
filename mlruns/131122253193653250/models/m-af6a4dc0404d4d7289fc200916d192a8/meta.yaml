@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-af6a4dc0404d4d7289fc200916d192a8/artifacts
+creation_timestamp: 1789618692254
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789618694069
+model_id: m-af6a4dc0404d4d7289fc200916d192a8
+model_type: null
+name: random_over_RandomForest
+source_run_id: 0184eda96d9e4f45b30e13367912952d
+status: 2
+status_message: null

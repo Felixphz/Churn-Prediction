@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/0945f3a5fb864eb693f715e0e86a47bf/artifacts
+end_time: 1789616351302
+entry_point_name: ''
+experiment_id: '131122253193653250'
+lifecycle_stage: active
+run_id: 0945f3a5fb864eb693f715e0e86a47bf
+run_name: adasyn_GradientBoosting
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789616309694
+status: 3
+tags: []
+user_id: nataliabernalgutierrez

@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-8771ee5a19774a4aba82fc52d4bfe948/artifacts
+creation_timestamp: 1789618925839
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789618927149
+model_id: m-8771ee5a19774a4aba82fc52d4bfe948
+model_type: null
+name: smote_enn_LogisticRegression
+source_run_id: 348e26ecfcf441f7b2fca0bc2c8077e0
+status: 2
+status_message: null

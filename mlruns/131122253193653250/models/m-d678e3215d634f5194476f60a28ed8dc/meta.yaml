@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-d678e3215d634f5194476f60a28ed8dc/artifacts
+creation_timestamp: 1789616349358
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789616351300
+model_id: m-d678e3215d634f5194476f60a28ed8dc
+model_type: null
+name: adasyn_GradientBoosting
+source_run_id: 0945f3a5fb864eb693f715e0e86a47bf
+status: 2
+status_message: null

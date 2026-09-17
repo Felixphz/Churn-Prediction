@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/bac3e3000943455a86e7a327432482b1/artifacts
+end_time: 1789616549940
+entry_point_name: ''
+experiment_id: '131122253193653250'
+lifecycle_stage: active
+run_id: bac3e3000943455a86e7a327432482b1
+run_name: smote_GradientBoosting
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789616495851
+status: 3
+tags: []
+user_id: nataliabernalgutierrez

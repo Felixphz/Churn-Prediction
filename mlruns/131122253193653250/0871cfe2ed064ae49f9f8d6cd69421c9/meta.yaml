@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/0871cfe2ed064ae49f9f8d6cd69421c9/artifacts
+end_time: 1789618942923
+entry_point_name: ''
+experiment_id: '131122253193653250'
+lifecycle_stage: active
+run_id: 0871cfe2ed064ae49f9f8d6cd69421c9
+run_name: smote_enn_NaiveBayes
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789618941492
+status: 3
+tags: []
+user_id: nataliabernalgutierrez

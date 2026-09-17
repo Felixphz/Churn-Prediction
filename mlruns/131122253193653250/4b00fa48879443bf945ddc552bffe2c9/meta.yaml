@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/4b00fa48879443bf945ddc552bffe2c9/artifacts
+end_time: 1789618603433
+entry_point_name: ''
+experiment_id: '131122253193653250'
+lifecycle_stage: active
+run_id: 4b00fa48879443bf945ddc552bffe2c9
+run_name: adasyn_LogisticRegression
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789618598318
+status: 3
+tags: []
+user_id: nataliabernalgutierrez

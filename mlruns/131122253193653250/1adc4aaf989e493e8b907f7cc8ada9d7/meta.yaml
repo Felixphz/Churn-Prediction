@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/1adc4aaf989e493e8b907f7cc8ada9d7/artifacts
+end_time: 1789616422945
+entry_point_name: ''
+experiment_id: '131122253193653250'
+lifecycle_stage: active
+run_id: 1adc4aaf989e493e8b907f7cc8ada9d7
+run_name: random_over_GradientBoosting
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789616380760
+status: 3
+tags: []
+user_id: nataliabernalgutierrez

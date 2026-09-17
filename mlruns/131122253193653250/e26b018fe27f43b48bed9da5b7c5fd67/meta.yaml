@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/e26b018fe27f43b48bed9da5b7c5fd67/artifacts
+end_time: 1789619023509
+entry_point_name: ''
+experiment_id: '131122253193653250'
+lifecycle_stage: active
+run_id: e26b018fe27f43b48bed9da5b7c5fd67
+run_name: smote_tomek_XGBoost
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789619013051
+status: 3
+tags: []
+user_id: nataliabernalgutierrez

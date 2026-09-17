@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-0186c34236264d1083a5a663e173de4a/artifacts
+creation_timestamp: 1789617776384
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789617777591
+model_id: m-0186c34236264d1083a5a663e173de4a
+model_type: null
+name: adasyn_NaiveBayes
+source_run_id: a60784ef0547435ba331ac52bd3994bc
+status: 2
+status_message: null

@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-074f9dd0cf47440d95d305d084fc4d32/artifacts
+creation_timestamp: 1789616421223
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789616422943
+model_id: m-074f9dd0cf47440d95d305d084fc4d32
+model_type: null
+name: random_over_GradientBoosting
+source_run_id: 1adc4aaf989e493e8b907f7cc8ada9d7
+status: 2
+status_message: null

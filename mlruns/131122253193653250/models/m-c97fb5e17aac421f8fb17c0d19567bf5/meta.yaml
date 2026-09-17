@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-c97fb5e17aac421f8fb17c0d19567bf5/artifacts
+creation_timestamp: 1789617756739
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789617758150
+model_id: m-c97fb5e17aac421f8fb17c0d19567bf5
+model_type: null
+name: adasyn_LogisticRegression
+source_run_id: f3272bdfa8c84ce8aea88e0e9e9a9c94
+status: 2
+status_message: null

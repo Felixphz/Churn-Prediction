@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-4f7a54b34ebf410e9089fce8321eb4da/artifacts
+creation_timestamp: 1789616688341
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789616690037
+model_id: m-4f7a54b34ebf410e9089fce8321eb4da
+model_type: null
+name: smote_tomek_GradientBoosting
+source_run_id: bb414a2a185f48c9a90f4cdd58bea481
+status: 2
+status_message: null

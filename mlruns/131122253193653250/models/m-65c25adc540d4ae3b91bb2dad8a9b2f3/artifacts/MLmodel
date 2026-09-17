@@ -1,0 +1,22 @@
+artifact_path: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-65c25adc540d4ae3b91bb2dad8a9b2f3/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.9.6
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.6.1
+mlflow_version: 3.1.4
+model_id: m-65c25adc540d4ae3b91bb2dad8a9b2f3
+model_size_bytes: 1776
+model_uuid: m-65c25adc540d4ae3b91bb2dad8a9b2f3
+prompts: null
+run_id: f105ba43fca74e6aac4789c3f58f0b02
+utc_time_created: '2026-09-17 04:17:52.684426'

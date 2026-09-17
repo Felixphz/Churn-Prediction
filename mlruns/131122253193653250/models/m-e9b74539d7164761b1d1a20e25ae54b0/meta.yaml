@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-e9b74539d7164761b1d1a20e25ae54b0/artifacts
+creation_timestamp: 1789618694272
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789618695479
+model_id: m-e9b74539d7164761b1d1a20e25ae54b0
+model_type: null
+name: random_over_NaiveBayes
+source_run_id: df6d0648015e4d0bb3d7a37290f6e11f
+status: 2
+status_message: null

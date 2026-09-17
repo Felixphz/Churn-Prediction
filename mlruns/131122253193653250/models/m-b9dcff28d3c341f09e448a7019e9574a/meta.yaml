@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-b9dcff28d3c341f09e448a7019e9574a/artifacts
+creation_timestamp: 1789616630720
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789616632548
+model_id: m-b9dcff28d3c341f09e448a7019e9574a
+model_type: null
+name: smote_tomek_RandomForest
+source_run_id: 5f0efed302b94cef8fc32df2ac85613a
+status: 2
+status_message: null

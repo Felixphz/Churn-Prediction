@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-f091cd571b164b12b02c1d6596dccb4a/artifacts
+creation_timestamp: 1789618793605
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789618795245
+model_id: m-f091cd571b164b12b02c1d6596dccb4a
+model_type: null
+name: random_under_XGBoost
+source_run_id: a10c478441e6499c8a47b20e7a563450
+status: 2
+status_message: null

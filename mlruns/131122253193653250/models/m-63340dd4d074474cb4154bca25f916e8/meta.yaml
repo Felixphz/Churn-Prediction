@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-63340dd4d074474cb4154bca25f916e8/artifacts
+creation_timestamp: 1789616352367
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789616353750
+model_id: m-63340dd4d074474cb4154bca25f916e8
+model_type: null
+name: random_over_LogisticRegression
+source_run_id: 0731a3e524cf4dd39a6c942eccc58d79
+status: 2
+status_message: null

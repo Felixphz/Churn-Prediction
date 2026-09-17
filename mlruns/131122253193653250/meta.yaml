@@ -1,0 +1,6 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250
+creation_time: 1789615713240
+experiment_id: '131122253193653250'
+last_update_time: 1789615713240
+lifecycle_stage: active
+name: churn_prediction

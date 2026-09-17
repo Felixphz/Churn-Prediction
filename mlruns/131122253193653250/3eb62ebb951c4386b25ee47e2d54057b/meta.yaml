@@ -1,0 +1,14 @@
+artifact_uri: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/3eb62ebb951c4386b25ee47e2d54057b/artifacts
+end_time: 1789618524628
+entry_point_name: ''
+experiment_id: '131122253193653250'
+lifecycle_stage: active
+run_id: 3eb62ebb951c4386b25ee47e2d54057b
+run_name: adasyn_SVM
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1789618391574
+status: 4
+tags: []
+user_id: nataliabernalgutierrez

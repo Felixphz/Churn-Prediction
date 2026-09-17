@@ -1,0 +1,10 @@
+artifact_location: file:///Users/nataliabernalgutierrez/Churn-Prediction/mlruns/131122253193653250/models/m-636e6cc862c64bf59787d9e6e77ea919/artifacts
+creation_timestamp: 1789618986087
+experiment_id: '131122253193653250'
+last_updated_timestamp: 1789618987457
+model_id: m-636e6cc862c64bf59787d9e6e77ea919
+model_type: null
+name: smote_tomek_LogisticRegression
+source_run_id: 8e6d8a833397493ab2b4163c7d27c502
+status: 2
+status_message: null
