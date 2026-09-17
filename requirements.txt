@@ -4,3 +4,7 @@ seaborn
 numpy
 matplotlib
 scipy
+imbalanced-learn
+scikit-learn
+mlflow
+xgboost
