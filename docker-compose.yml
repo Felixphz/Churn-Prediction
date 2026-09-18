@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  postgres:
+    build: ./infra/postgres
+    container_name: churn-postgres
+    environment:
+      POSTGRES_DB: churn_prediction
+      POSTGRES_USER: ${DB_USER:-user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-user} -d churn_prediction"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mlflow:
+    build: ./infra/mlflow
+    container_name: churn-mlflow
+    environment:
+      DB_USER: ${DB_USER:-user}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+    command: >
+      mlflow server
+      --backend-store-uri postgresql://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/mlflow
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    container_name: churn-api
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/churn_prediction
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      ENVIRONMENT: development
+      MODEL_THRESHOLD: "0.30"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ml_pipeline:/ml_pipeline
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+
+  dashboard:
+    build: ./dashboard
+    container_name: churn-dashboard
+    command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  mlflow_artifacts:

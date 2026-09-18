@@ -1,2 +1,44 @@
+# Data
 *.csv
+*.joblib
+*.pkl
+
+# Virtual environments
 .venv
+venv/
+backend/venv/
+
+# IDEs
+.opencode
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environment
+.env
+.env.local
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+
+# Alembic
+alembic/versions/*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
