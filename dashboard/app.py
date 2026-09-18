@@ -4,7 +4,8 @@ import pandas as pd
 
 st.set_page_config(page_title="Churn Prediction Dashboard", layout="wide")
 
-API_URL = "http://api:8000"
+import os
+API_URL = os.getenv("API_URL", "http://api:8000")
 
 st.title("Churn Prediction Dashboard")
 
