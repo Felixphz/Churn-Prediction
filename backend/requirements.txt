@@ -16,7 +16,7 @@ shap
 joblib
 
 # MLflow
-mlflow>=2.10
+mlflow==2.21.0
 
 # Utils
 python-dotenv

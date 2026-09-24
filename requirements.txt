@@ -6,5 +6,6 @@ matplotlib
 scipy
 imbalanced-learn
 scikit-learn
-mlflow
+mlflow==2.21.0
 xgboost
+lazypredict
