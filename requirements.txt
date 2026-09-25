@@ -8,3 +8,4 @@ imbalanced-learn
 scikit-learn
 mlflow
 xgboost
+lazypredict
