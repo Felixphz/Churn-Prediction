@@ -5,6 +5,7 @@
 
 # Virtual environments
 .venv
+mlflow.db
 venv/
 backend/venv/
 

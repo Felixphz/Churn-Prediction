@@ -1,0 +1,23 @@
+artifact_path: file:D:/andre/Documents/UdeA/Churn-Prediction/ml_pipeline/notebooks/mlruns/1/models/m-9d70ff0c0540454f9e3b46f1d31ac7d3/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.12.6
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.5.2
+    skops_trusted_types: null
+mlflow_version: 3.16.1
+model_id: m-9d70ff0c0540454f9e3b46f1d31ac7d3
+model_size_bytes: 19673825
+model_uuid: m-9d70ff0c0540454f9e3b46f1d31ac7d3
+prompts: null
+run_id: 82959a38223c45cf92c76884debcc1d4
+utc_time_created: '2026-09-25 01:25:09.135343'
