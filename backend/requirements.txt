@@ -1,0 +1,31 @@
+# API
+fastapi
+uvicorn[standard]
+pydantic>=2.0
+pydantic-settings>=2.0
+
+# Database
+sqlalchemy>=2.0
+psycopg2-binary
+alembic
+
+# ML
+scikit-learn
+xgboost
+shap
+joblib
+
+# MLflow
+mlflow>=2.10
+
+# Utils
+python-dotenv
+pandas
+numpy
+
+# Scheduler
+apscheduler
+
+# Testing
+pytest
+httpx
