@@ -10,7 +10,7 @@ psycopg2-binary
 alembic
 
 # ML
-scikit-learn
+scikit-learn==1.9.1
 xgboost
 shap
 joblib
@@ -19,7 +19,6 @@ joblib
 mlflow>=2.10
 
 # Utils
-python-dotenv
 pandas
 numpy
 

@@ -16,7 +16,7 @@ page = st.sidebar.radio("Go to", ["Home", "Customers", "Predictions", "Pipeline"
 if page == "Home":
     st.header("Overview")
     try:
-        res = requests.get(f"{API_URL}/api/v1/dashboard/summary", timeout=10)
+        res = requests.get(f"{API_URL}/api/v1/dashboard/summary", timeout=60)
         if res.status_code == 200:
             data = res.json()
             col1, col2, col3, col4 = st.columns(4)
@@ -32,7 +32,7 @@ if page == "Home":
 elif page == "Customers":
     st.header("Customers")
     try:
-        res = requests.get(f"{API_URL}/api/v1/customers/", timeout=10)
+        res = requests.get(f"{API_URL}/api/v1/customers/", timeout=60)
         if res.status_code == 200:
             data = res.json()
             df = pd.DataFrame(data["customers"])
@@ -52,7 +52,7 @@ elif page == "Predictions":
                 res = requests.post(
                     f"{API_URL}/api/v1/predictions/predict",
                     json={"customer_id": customer_id, "threshold": threshold},
-                    timeout=30,
+                    timeout=90,
                 )
                 if res.status_code == 200:
                     result = res.json()
@@ -75,7 +75,7 @@ elif page == "Pipeline":
         if st.button("Run Batch"):
             with st.spinner("Running batch predictions..."):
                 try:
-                    res = requests.post(f"{API_URL}/api/v1/predictions/batch", timeout=120)
+                    res = requests.post(f"{API_URL}/api/v1/predictions/batch", timeout=180)
                     if res.status_code == 200:
                         st.success("Batch complete!")
                         st.json(res.json())
@@ -87,7 +87,7 @@ elif page == "Pipeline":
         if st.button("Trigger Retrain"):
             with st.spinner("Training in background..."):
                 try:
-                    res = requests.post(f"{API_URL}/api/v1/retrain/trigger", timeout=10)
+                    res = requests.post(f"{API_URL}/api/v1/retrain/trigger", timeout=90)
                     if res.status_code == 200:
                         st.success("Retrain triggered!")
                 except Exception as e:
@@ -95,7 +95,7 @@ elif page == "Pipeline":
 
     st.subheader("Retrain History")
     try:
-        res = requests.get(f"{API_URL}/api/v1/retrain/history?limit=5", timeout=10)
+        res = requests.get(f"{API_URL}/api/v1/retrain/history?limit=5", timeout=60)
         if res.status_code == 200:
             data = res.json()
             if data["runs"]:

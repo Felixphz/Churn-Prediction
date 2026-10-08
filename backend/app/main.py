@@ -12,7 +12,7 @@ async def lifespan(app: FastAPI):
     print(f"Starting Churn Prediction API - {settings.ENVIRONMENT}")
 
     # Start scheduler for monthly retrain
-    if settings.ENVIRONMENT != "test":
+    if settings.ENVIRONMENT != "test" and settings.ENABLE_SCHEDULER:
         from app.utils.scheduler import start_scheduler
         start_scheduler()
 

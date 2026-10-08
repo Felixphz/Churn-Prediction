@@ -77,6 +77,7 @@ def predict_on_demand(db: Session, customer_id: str, threshold: float = 0.3) -> 
             "top_features": result["top_features"],
             "base_value": result["base_value"],
             "all_shap_values": result["all_shap_values"],
+            "shap_available": result.get("shap_available", True),
         },
         "predicted_at": db_prediction.predicted_at.isoformat(),
         "prediction_type": "on_demand",

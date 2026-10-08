@@ -10,6 +10,9 @@ class Settings(BaseSettings):
 
     # MLflow
     MLFLOW_TRACKING_URI: str = "http://localhost:5000"
+    REGISTRY_MODEL_NAME: str = "churn-model"
+    MODEL_ALIAS: str = "production"
+    MODEL_REFRESH_TTL_SECONDS: int = 30
 
     # API
     API_HOST: str = "0.0.0.0"
@@ -22,6 +25,10 @@ class Settings(BaseSettings):
 
     # Retrain
     RETRAIN_MIN_IMPROVEMENT: float = 0.01
+
+    # Startup flags
+    SEED_ON_STARTUP: bool = True
+    ENABLE_SCHEDULER: bool = True
 
     class Config:
         env_file = ".env"

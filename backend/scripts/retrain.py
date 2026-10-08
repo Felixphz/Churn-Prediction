@@ -141,18 +141,48 @@ def run_retrain():
             if active:
                 active.is_active = False
 
-            # Save model
+            # Save model (local artifact for debugging)
             model_path = os.path.join(
                 os.path.dirname(__file__), "..", "..",
                 "ml_pipeline", "data", "results",
                 f"best_model_{best_model_name}.joblib"
             )
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
             joblib.dump(best_model, model_path)
+
+            # Register in MLflow Model Registry and promote to production alias
+            mlflow_run_id = None
+            try:
+                mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
+                mlflow.set_experiment("churn_prediction")
+                with mlflow.start_run(run_name=f"register_{best_model_name}_{run_id}") as mlf_run:
+                    mlflow.log_params(best_params)
+                    mlflow.log_metrics(
+                        {"f1_macro": best_f1, "recall": best_recall, "auc_roc": best_auc}
+                    )
+                    mlflow.sklearn.log_model(
+                        best_model, name="model", serialization_format="cloudpickle"
+                    )
+                    mlflow_run_id = mlf_run.info.run_id
+
+                model_version = mlflow.register_model(
+                    f"runs:/{mlflow_run_id}/model", settings.REGISTRY_MODEL_NAME
+                )
+                client = mlflow.MlflowClient()
+                client.set_registered_model_alias(
+                    settings.REGISTRY_MODEL_NAME, settings.MODEL_ALIAS, model_version.version
+                )
+                print(
+                    f"MLflow Registry: {settings.REGISTRY_MODEL_NAME} "
+                    f"v{model_version.version} -> @{settings.MODEL_ALIAS}"
+                )
+            except Exception as e:
+                print(f"MLflow registration failed (model still active in app DB): {e}")
 
             # Register new model
             new_model = ModelRegistry(
                 model_name=best_model_name,
-                model_version=run_id,
+                model_version=mlflow_run_id or run_id,
                 f1_score=best_f1,
                 recall=best_recall,
                 auc_roc=best_auc,
@@ -162,7 +192,7 @@ def run_retrain():
                 activated_at=datetime.utcnow(),
             )
             db.add(new_model)
-            history.best_model_mlflow_run_id = run_id
+            history.best_model_mlflow_run_id = mlflow_run_id or run_id
             print(f"New model activated: {best_model_name} (F1={best_f1:.4f})")
         else:
             print("Keeping current model.")
