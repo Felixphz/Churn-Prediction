@@ -11,9 +11,13 @@ st.title("Churn Prediction Dashboard")
 
 # Sidebar
 st.sidebar.header("Navigation")
-page = st.sidebar.radio("Go to", ["Home", "Customers", "Predictions", "Pipeline"])
+page = st.sidebar.radio("Go to", ["Dashboard", "Home", "Customers", "Predictions", "Pipeline"])
 
-if page == "Home":
+if page == "Dashboard":
+    from analytics_page import render as render_dashboard
+    render_dashboard(API_URL)
+
+elif page == "Home":
     st.header("Overview")
     try:
         res = requests.get(f"{API_URL}/api/v1/dashboard/summary", timeout=60)
