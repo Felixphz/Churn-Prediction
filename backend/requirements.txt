@@ -10,7 +10,7 @@ psycopg2-binary
 alembic
 
 # ML
-scikit-learn==1.9.1
+scikit-learn==1.6.1
 xgboost
 shap
 joblib
