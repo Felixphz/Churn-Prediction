@@ -240,6 +240,13 @@ def load_at_risk(level: str):
     return res.json()
 
 
+def clear_results_cache():
+    """Olvida los resultados cacheados para leer las predicciones nuevas."""
+    load_analytics.clear()
+    load_customers.clear()
+    load_at_risk.clear()
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def predict_payload(payload_json: str):
     """Predicción para un cliente ingresado a mano (cacheada por payload)."""
@@ -348,7 +355,7 @@ def render_overview():
         page_header("Resumen", "Cuántos clientes podrían irse y dónde se concentra el riesgo.")
     with action:
         if st.button("Actualizar", width="stretch"):
-            load_analytics.clear()
+            clear_results_cache()
 
     try:
         data = load_analytics()
@@ -976,7 +983,7 @@ def run_batch():
     except Exception:  # noqa: BLE001
         connection_error()
         return
-    load_analytics.clear()
+    clear_results_cache()
     if r["status"] == "completed":
         st.success(f"Listo: se analizaron {r['processed']:,} clientes; "
                    f"{r['churn_predicted']:,} están en riesgo.")
