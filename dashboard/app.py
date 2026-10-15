@@ -1,3 +1,4 @@
+import json
 import os
 
 import pandas as pd
@@ -76,7 +77,13 @@ st.markdown(
     .page-sub {{ color: {MUTED}; font-size: .92rem; margin: .1rem 0 1.4rem; }}
     .card-title {{ font-size: 1rem; font-weight: 600; margin-bottom: .7rem; color: {TEXT}; }}
 
-    [class*="st-key-card_k"] {{ height: 108px; justify-content: center; }}
+    /* Fila de gráficos del resumen: ambas tarjetas con la misma altura */
+    .st-key-card_dist, .st-key-card_seg {{ min-height: 545px; }}
+    .kpi-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+                 gap: 1rem; margin-bottom: .4rem; }}
+    .kpi-card {{ background: #FFFFFF; border-radius: 22px; padding: 1.2rem 1.4rem;
+                 box-shadow: 0 10px 30px rgba(30, 64, 175, .06), 0 1px 3px rgba(16, 24, 40, .04);
+                 display: flex; align-items: center; min-height: 104px; }}
     .kpi {{ display: flex; align-items: center; gap: 16px; }}
     .kpi > div:last-child {{ min-width: 0; }}
     .kpi-icon {{ width: 52px; height: 52px; border-radius: 16px; display: flex; flex-shrink: 0;
@@ -105,6 +112,15 @@ st.markdown(
         box-shadow: 0 4px 12px rgba(37, 99, 235, .2);
     }}
     .stTextInput input {{ border-radius: 12px; }}
+
+    .whatif-track {{ position: relative; height: 6px; margin-top: .45rem; }}
+    .whatif-track > div {{ position: absolute; left: 0; top: 0; height: 6px; border-radius: 999px; }}
+
+    .st-key-card_summary {{ padding-bottom: 2.3rem; }}
+    .summary {{ display: flex; gap: 14px; align-items: flex-start; font-size: .95rem; line-height: 1.6; }}
+    .summary-icon {{ width: 40px; height: 40px; border-radius: 12px; background: {BLUE_SOFT};
+                     color: {PRIMARY}; display: flex; align-items: center; justify-content: center;
+                     flex-shrink: 0; }}
 
     /* ---- Formulario ---- */
     .form-section {{ display: flex; gap: 14px; align-items: flex-start; margin: 1.2rem 0 .4rem;
@@ -148,15 +164,16 @@ def page_header(title: str, subtitle: str):
                 unsafe_allow_html=True)
 
 
-def kpi_card(key: str, icon_name: str, value: str, label: str, color: str = PRIMARY):
-    with st.container(key=f"card_{key}"):
-        st.markdown(
-            f'<div class="kpi"><div class="kpi-icon" style="background:linear-gradient(135deg,{color},{color}B3);'
-            f'box-shadow:0 6px 14px {color}40">'
-            f'{icon(icon_name)}</div><div><div class="kpi-value">{value}</div>'
-            f'<div class="kpi-label">{label}</div></div></div>',
-            unsafe_allow_html=True,
-        )
+def kpi_row(items: list[tuple[str, str, str, str]]):
+    """Fila de KPIs (icono, valor, etiqueta, color) en una grilla: todas con la misma altura."""
+    cards = "".join(
+        f'<div class="kpi-card"><div class="kpi"><div class="kpi-icon" '
+        f'style="background:linear-gradient(135deg,{color},{color}B3);box-shadow:0 6px 14px {color}40">'
+        f'{icon(icon_name)}</div><div><div class="kpi-value">{value}</div>'
+        f'<div class="kpi-label">{label}</div></div></div></div>'
+        for icon_name, value, label, color in items
+    )
+    st.markdown(f'<div class="kpi-grid">{cards}</div>', unsafe_allow_html=True)
 
 
 def risk_level(prob: float):
@@ -210,6 +227,24 @@ def load_analytics():
 def load_customers(page: int, page_size: int):
     res = requests.get(f"{API_URL}/api/v1/customers",
                        params={"page": page, "page_size": page_size}, timeout=60)
+    res.raise_for_status()
+    return res.json()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_at_risk(level: str):
+    res = requests.get(f"{API_URL}/api/v1/dashboard/at-risk",
+                       params={"level": level, "limit": 5000}, timeout=60)
+    res.raise_for_status()
+    return res.json()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def predict_payload(payload_json: str):
+    """Predicción para un cliente ingresado a mano (cacheada por payload)."""
+    res = requests.post(f"{API_URL}/api/v1/predictions/predict-data",
+                        data=payload_json, headers={"Content-Type": "application/json"},
+                        timeout=90)
     res.raise_for_status()
     return res.json()
 
@@ -277,6 +312,11 @@ def customer_value(field: str, customer: dict) -> str:
     return plain(v)
 
 
+def feature_label(name: str) -> str:
+    """Nombre claro de una variable del modelo (incluye columnas one-hot)."""
+    return FEATURES.get(name.split("_")[0], (name, ""))[0]
+
+
 def group_reasons(shap_values: dict) -> list[tuple[str, str, float]]:
     """Suma el impacto de las columnas one-hot por variable original."""
     totals: dict[str, float] = {}
@@ -287,7 +327,7 @@ def group_reasons(shap_values: dict) -> list[tuple[str, str, float]]:
 
 
 # ------------------------------------------------------------- Navegación
-PAGES = ["Resumen", "Consultar cliente", "Clientes", "Mantenimiento"]
+PAGES = ["Resumen", "A quién llamar", "Consultar cliente", "Clientes", "Mantenimiento"]
 
 with st.sidebar:
     st.markdown(
@@ -319,17 +359,17 @@ def render_overview():
     scored = preds.get("customers_scored") or 0
     at_risk = preds.get("predicted_churn") or 0
 
-    k = st.columns(4)
-    with k[0]:
-        kpi_card("k1", "users", f"{cust.get('total', 0):,}", "Clientes totales")
-    with k[1]:
-        kpi_card("k2", "alert", f"{at_risk:,}" if scored else "—", "Clientes en riesgo de irse", RED)
-    with k[2]:
-        kpi_card("k3", "percent", f"{at_risk / scored * 100:.1f}%" if scored else "—",
-                 "Porcentaje en riesgo", AMBER)
-    with k[3]:
-        kpi_card("k4", "money", f"${cust.get('total_monthly_revenue', 0):,.0f}",
-                 "Facturación mensual", GREEN)
+    pct_risk = at_risk / scored * 100 if scored else 0
+    revenue = cust.get("total_monthly_revenue", 0) or 0
+    revenue_risk = preds.get("revenue_at_risk") or 0
+
+    kpi_row([
+        ("users", f"{cust.get('total', 0):,}", "Clientes totales", PRIMARY),
+        ("alert", f"{at_risk:,}" if scored else "—",
+         f"En riesgo de irse ({pct_risk:.0f}%)" if scored else "En riesgo de irse", RED),
+        ("money", f"${revenue_risk:,.0f}" if scored else "—", "Facturación en riesgo", AMBER),
+        ("money", f"${revenue:,.0f}", "Facturación mensual", GREEN),
+    ])
 
     st.write("")
 
@@ -340,6 +380,9 @@ def render_overview():
             if st.button("Analizar a todos los clientes", type="primary"):
                 run_batch()
         return
+
+    render_summary(cust, preds, pct_risk, revenue_risk, revenue)
+    st.write("")
 
     top_row = st.columns([1.7, 1], gap="medium")
 
@@ -371,7 +414,7 @@ def render_overview():
                 fig.update_xaxes(range=[0, 100], ticksuffix="%", showgrid=False,
                                  linecolor=GRID, tickfont=dict(color=MUTED))
                 fig.update_yaxes(gridcolor=GRID, zeroline=False, tickfont=dict(color=MUTED))
-                plot(fig, 260)
+                plot(fig, 400)
                 st.caption("Clientes según su probabilidad estimada de irse (muestra).")
 
     with top_row[1]:
@@ -387,32 +430,49 @@ def render_overview():
             }
             choice = st.segmented_control("Agrupar por", list(options), default="Contrato",
                                           label_visibility="collapsed") or "Contrato"
+            view_mode = st.radio(
+                "Cómo leerlo", ["Reparto del riesgo", "% dentro de cada grupo"],
+                horizontal=True, label_visibility="collapsed", key="seg_mode",
+            )
+            share_mode = view_mode == "Reparto del riesgo"
             df = pd.DataFrame(options[choice])
             df = df.dropna(subset=["churn_rate"]) if "churn_rate" in df else df.iloc[0:0]
-            if df.empty:
+            if df.empty or df["predicted_churn"].sum() == 0:
                 st.caption("Sin datos para esta vista.")
             else:
+                total_risk = df["predicted_churn"].sum()
+                df["share"] = df["predicted_churn"] / total_risk * 100
+                metric = "share" if share_mode else "churn_rate"
                 if choice == "Antigüedad":
                     df = df.sort_values("value", key=lambda s: s.str.extract(r"(\d+)")[0].astype(int))
                 else:
-                    df = df.sort_values("churn_rate")
+                    df = df.sort_values(metric)
                 df["label"] = df["value"].map(plain)
-                top = df["churn_rate"].max()
+                top = df[metric].max()
                 fig = go.Figure(go.Bar(
-                    x=df["churn_rate"], y=df["label"], orientation="h",
-                    marker=dict(color=[ACCENT if v == top else "#93C5FD" for v in df["churn_rate"]],
+                    x=df[metric], y=df["label"], orientation="h",
+                    marker=dict(color=[ACCENT if v == top else "#93C5FD" for v in df[metric]],
                                 cornerradius=6),
-                    text=[f"{v:.0f}%" for v in df["churn_rate"]], textposition="outside",
-                    cliponaxis=False, customdata=df["customers"],
-                    hovertemplate="%{y}<br>%{x:.1f}% en riesgo<br>%{customdata:,} clientes<extra></extra>",
+                    text=[f"{v:.0f}%" for v in df[metric]], textposition="outside",
+                    cliponaxis=False,
+                    customdata=df[["predicted_churn", "customers", "churn_rate", "share"]],
+                    hovertemplate=("%{y}<br>%{customdata[0]:,} en riesgo de %{customdata[1]:,} "
+                                   "clientes del grupo<br>%{customdata[2]:.0f}% del grupo · "
+                                   "%{customdata[3]:.0f}% de todos los clientes en riesgo"
+                                   "<extra></extra>"),
                 ))
                 fig.update_xaxes(visible=False, range=[0, max(top * 1.3, 10)])
                 fig.update_yaxes(showgrid=False, ticksuffix="  ")
                 fig.update_layout(bargap=0.5, margin=dict(l=0, r=36, t=10, b=0))
-                plot(fig, 60 + 42 * len(df))
-                worst = df.loc[df["churn_rate"].idxmax()]
-                st.caption(f"Mayor riesgo: **{worst['label']}** "
-                           f"({worst['churn_rate']:.0f}% podría irse).")
+                plot(fig, 270)
+                worst = df.loc[df[metric].idxmax()]
+                if share_mode:
+                    st.caption(f"De los {total_risk:,} clientes en riesgo, **{worst['share']:.0f}%** "
+                               f"son **{worst['label']}**. Las barras suman 100%.")
+                else:
+                    st.caption(f"Cada barra es el % de clientes **de ese grupo** que podría irse "
+                               f"(por eso no suman 100%). Ej.: {worst['churn_rate']:.0f}% de los "
+                               f"clientes **{worst['label']}** está en riesgo.")
 
     st.write("")
     with st.container(key="card_levels"):
@@ -427,6 +487,148 @@ def render_overview():
         )
         st.markdown(f'<div class="rings">{rings}</div>', unsafe_allow_html=True)
         st.caption("Bajo: menos de 30% · Medio: 30–60% · Alto: 60% o más de probabilidad de irse.")
+
+    render_influences(preds)
+
+
+def render_summary(cust: dict, preds: dict, pct_risk: float, revenue_risk: float, revenue: float):
+    """Párrafo en lenguaje claro con lo más importante del resumen."""
+    groups = [
+        (plain(g["value"]), label, g["churn_rate"])
+        for label, items in (cust.get("segments") or {}).items()
+        if label in ("Contrato", "Internet", "Método de pago")
+        for g in items if g.get("churn_rate") is not None and g.get("customers", 0) >= 100
+    ]
+    high = sum(v for k, v in (preds.get("risk_levels") or {}).items() if k.startswith("Alto"))
+
+    sentences = [f"De cada 100 clientes, <b>{pct_risk:.0f}</b> podrían irse."]
+    if revenue:
+        sentences.append(f"Eso representa <b>${revenue_risk:,.0f}</b> al mes "
+                         f"({revenue_risk / revenue * 100:.0f}% de la facturación).")
+    if groups:
+        name, label, rate = max(groups, key=lambda g: g[2])
+        sentences.append(f"El grupo más afectado es <b>{name}</b> ({label.lower()}): "
+                         f"{rate:.0f}% de esos clientes está en riesgo.")
+    if high:
+        sentences.append(f"Lo más urgente: los <b>{high:,} clientes de riesgo alto</b>; "
+                         f"encuéntralos en <b>A quién llamar</b>.")
+
+    with st.container(key="card_summary"):
+        st.markdown(
+            f'<div class="summary"><div class="summary-icon">{icon("logo", 20)}</div>'
+            f'<div><div class="card-title" style="margin-bottom:.25rem">En pocas palabras</div>'
+            f'{" ".join(sentences)}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+
+def render_influences(preds: dict):
+    """Factores que más pesan en las predicciones, sin cifras técnicas."""
+    totals: dict[str, float] = {}
+    for f in preds.get("top_features") or []:
+        name = feature_label(f["feature"])
+        totals[name] = totals.get(name, 0.0) + float(f.get("mean_abs_shap") or 0)
+    top = sorted(totals.items(), key=lambda r: -r[1])[:5]
+    if not top:
+        return
+
+    st.write("")
+    with st.container(key="card_influences"):
+        st.markdown('<div class="card-title">Lo que más influye</div>', unsafe_allow_html=True)
+        st.caption("Factores que más pesan al estimar si un cliente se va, de mayor a menor.")
+        names = [n for n, _ in top][::-1]
+        values = [v for _, v in top][::-1]
+        fig = go.Figure(go.Bar(
+            x=values, y=names, orientation="h",
+            marker=dict(color=[ACCENT if i == len(values) - 1 else "#93C5FD"
+                               for i in range(len(values))], cornerradius=6),
+            hovertemplate="%{y}<extra></extra>",
+        ))
+        fig.update_xaxes(visible=False)
+        fig.update_yaxes(showgrid=False, ticksuffix="  ")
+        fig.update_layout(bargap=0.45)
+        plot(fig, 60 + 40 * len(names))
+
+
+# --------------------------------------------------------- A quién llamar
+CALL_LEVELS = {"Riesgo alto": "alto", "Riesgo medio": "medio", "Todos en riesgo": "todos"}
+
+
+def reason_text(feature: str | None, row: dict) -> str:
+    """'Tipo de internet: Fibra óptica' — variable en claro + valor del cliente si lo tenemos."""
+    if not feature:
+        return "—"
+    field = FEATURES.get(feature.split("_")[0], (None, ""))[1]
+    if field in row and row[field] is not None:
+        return f"{feature_label(feature)}: {customer_value(field, row)}"
+    return feature_label(feature)
+
+
+def render_call_list():
+    page_header("A quién llamar",
+                "Clientes en riesgo ordenados por prioridad: primero los que más probabilidad "
+                "tienen de irse y más pagan.")
+
+    with st.container(key="card_calls"):
+        top, dl = st.columns([3, 1], vertical_alignment="center")
+        with top:
+            choice = st.segmented_control("Mostrar", list(CALL_LEVELS), default="Riesgo alto",
+                                          label_visibility="collapsed") or "Riesgo alto"
+        try:
+            data = load_at_risk(CALL_LEVELS[choice])
+        except Exception:  # noqa: BLE001
+            connection_error()
+            return
+
+        df = pd.DataFrame(data["customers"])
+        if df.empty:
+            st.caption("No hay clientes en este nivel de riesgo. Si aún no se ha analizado a los "
+                       "clientes, hazlo desde Mantenimiento.")
+            return
+
+        view = pd.DataFrame({
+            "Prioridad": range(1, len(df) + 1),
+            "Código": df["customer_id"],
+            "Probabilidad de irse": df["churn_probability"] * 100,
+            "Motivo principal": [reason_text(f, row) for f, row in zip(df["top_reason"],
+                                                                      df.to_dict("records"))],
+            "Meses como cliente": df["tenure"],
+            "Contrato": df["contract"].map(plain),
+            "Internet": df["internet_service"].map(plain),
+            "Método de pago": df["payment_method"].map(plain),
+            "Cargo mensual": df["monthly_charges"],
+            "Ingreso en riesgo": df["revenue_at_risk"],
+        })
+        with dl:
+            st.download_button(
+                "Descargar lista (Excel/CSV)",
+                view.to_csv(index=False, float_format="%.2f").encode("utf-8-sig"),
+                file_name=f"clientes_{CALL_LEVELS[choice]}_riesgo.csv",
+                mime="text/csv", width="stretch",
+            )
+
+        st.markdown(
+            f'<div style="color:{MUTED};font-size:.88rem;margin:.2rem 0 .6rem">'
+            f'<b style="color:{TEXT}">{data["total"]:,} clientes</b> · '
+            f'<b style="color:{TEXT}">${df["monthly_charges"].sum():,.0f}</b> de facturación mensual '
+            f'· ingreso esperado en riesgo <b style="color:{TEXT}">'
+            f'${df["revenue_at_risk"].sum():,.0f}</b> al mes</div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(
+            view, width="stretch", hide_index=True, height=620,
+            column_config={
+                "Prioridad": st.column_config.NumberColumn(width="small"),
+                "Probabilidad de irse": st.column_config.ProgressColumn(
+                    format="%.0f%%", min_value=0, max_value=100),
+                "Cargo mensual": st.column_config.NumberColumn(format="$%.2f"),
+                "Ingreso en riesgo": st.column_config.NumberColumn(
+                    format="$%.2f",
+                    help="Probabilidad de irse × cargo mensual: cuánto se espera perder al mes."),
+            },
+        )
+        st.caption("Para ver por qué un cliente está en riesgo y qué ofrecerle, ingrésalo en "
+                   "**Consultar cliente**.")
 
 
 # ------------------------------------------------------ Consultar cliente
@@ -462,6 +664,7 @@ def clear_form():
     for key in FORM_KEYS:
         st.session_state[key] = None
     st.session_state.pop("lookup_result", None)
+    st.session_state.pop("lookup_scenarios", None)
 
 
 def build_payload(v: dict) -> tuple[dict | None, list[str]]:
@@ -579,20 +782,74 @@ def render_lookup():
             else:
                 with st.spinner("Analizando…"):
                     try:
-                        res = requests.post(f"{API_URL}/api/v1/predictions/predict-data",
-                                            json=payload, timeout=90)
+                        result = predict_payload(json.dumps(payload, sort_keys=True))
+                        base = float(result["prediction"]["churn_probability"])
+                        scenarios = []
+                        for action, variant in retention_scenarios(payload):
+                            p = predict_payload(json.dumps(variant, sort_keys=True))
+                            scenarios.append((action, float(p["prediction"]["churn_probability"])))
+                    except requests.HTTPError:
+                        result = "error"
                     except Exception:  # noqa: BLE001
-                        res = None
-                if res is None:
+                        result = None
+                if result is None:
                     connection_error()
-                elif res.status_code != 200:
+                elif result == "error":
                     st.error("No se pudo calcular el riesgo en este momento.")
                 else:
-                    st.session_state["lookup_result"] = res.json()
+                    st.session_state["lookup_result"] = result
                     st.session_state["lookup_customer"] = payload
+                    st.session_state["lookup_scenarios"] = sorted(
+                        [(a, p) for a, p in scenarios if base - p >= 0.01], key=lambda r: r[1])
 
     with result_col:
         render_result()
+
+
+def retention_scenarios(payload: dict) -> list[tuple[str, dict]]:
+    """Acciones de retención que aplican a este cliente, como variantes del payload."""
+    has_net = payload["internet_service"] != "No"
+    actions = []
+    if payload["contract"] == "Month-to-month":
+        actions.append(("Ofrecer contrato de 1 año", {"contract": "One year"}))
+        actions.append(("Ofrecer contrato de 2 años", {"contract": "Two year"}))
+    if has_net and payload["tech_support"] == "No":
+        actions.append(("Incluir soporte técnico", {"tech_support": "Yes"}))
+    if has_net and payload["online_security"] == "No":
+        actions.append(("Incluir seguridad online", {"online_security": "Yes"}))
+    if payload["payment_method"] == "Electronic check":
+        actions.append(("Pasar a pago automático con tarjeta",
+                        {"payment_method": "Credit card (automatic)"}))
+    if payload["monthly_charges"] > 0:
+        actions.append(("Descuento del 10% en el cargo mensual",
+                        {"monthly_charges": round(payload["monthly_charges"] * 0.9, 2)}))
+    return [(label, {**payload, **change}) for label, change in actions]
+
+
+def render_scenarios(prob: float):
+    scenarios = st.session_state.get("lookup_scenarios")
+    if scenarios is None:
+        return
+    st.write("")
+    with st.container(key="card_whatif"):
+        st.markdown('<div class="card-title">¿Qué pasaría si…?</div>', unsafe_allow_html=True)
+        if not scenarios:
+            st.caption("Ninguna acción estándar reduce su riesgo de forma notable.")
+            return
+        st.caption("Acciones que podrías ofrecerle y cómo cambiaría su riesgo.")
+        rows = ""
+        for action, new in scenarios:
+            _, new_color = risk_level(new)
+            _, old_color = risk_level(prob)
+            rows += (
+                f'<div class="reason"><div style="display:flex;justify-content:space-between;gap:8px">'
+                f'<span>{action}</span><b style="white-space:nowrap">'
+                f'<span style="color:{old_color}">{prob * 100:.0f}%</span> → '
+                f'<span style="color:{new_color}">{new * 100:.0f}%</span></b></div>'
+                f'<div class="whatif-track"><div style="width:{prob * 100:.1f}%;background:{TRACK}"></div>'
+                f'<div style="width:{new * 100:.1f}%;background:{new_color}"></div></div></div>'
+            )
+        st.markdown(rows, unsafe_allow_html=True)
 
 
 def render_result():
@@ -652,6 +909,8 @@ def render_result():
         block("Aumenta el riesgo", up, RED)
         st.write("")
         block("Reduce el riesgo", down, GREEN)
+
+    render_scenarios(prob)
 
 
 # --------------------------------------------------------------- Clientes
@@ -773,6 +1032,7 @@ def render_maintenance():
 
 {
     "Resumen": render_overview,
+    "A quién llamar": render_call_list,
     "Consultar cliente": render_lookup,
     "Clientes": render_customers,
     "Mantenimiento": render_maintenance,

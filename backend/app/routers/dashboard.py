@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
@@ -91,10 +91,8 @@ def _segment_stats(df: pd.DataFrame, col: str) -> list[dict]:
     return sorted(out, key=lambda r: -r["customers"])
 
 
-@router.get("/analytics")
-def dashboard_analytics(db: Session = Depends(get_db)):
-    """Agregados para el dashboard: clientes, servicios, predicciones y modelo."""
-    # Última predicción por cliente
+def _latest_rows(db: Session):
+    """Cada cliente con su última predicción: (Customer, prob, pred, top_features)."""
     latest = (
         db.query(
             Prediction.customer_id.label("cid"),
@@ -103,11 +101,12 @@ def dashboard_analytics(db: Session = Depends(get_db)):
         .group_by(Prediction.customer_id)
         .subquery()
     )
-    rows = (
+    return (
         db.query(
             Customer,
             Prediction.churn_probability,
             Prediction.churn_prediction,
+            Prediction.top_features,
         )
         .outerjoin(latest, latest.c.cid == Customer.id)
         .outerjoin(
@@ -117,6 +116,50 @@ def dashboard_analytics(db: Session = Depends(get_db)):
         )
         .all()
     )
+
+
+RISK_RANGES = {"alto": (0.60, 1.01), "medio": (0.30, 0.60), "todos": (0.30, 1.01)}
+
+
+@router.get("/at-risk")
+def at_risk_customers(
+    level: str = Query("todos", pattern="^(alto|medio|todos)$"),
+    limit: int = Query(500, ge=1, le=5000),
+    db: Session = Depends(get_db),
+):
+    """Clientes en riesgo ordenados por ingreso en riesgo (probabilidad × cargo mensual)."""
+    lo, hi = RISK_RANGES[level]
+    seen = set()
+    out = []
+    for c, prob, _, top_features in _latest_rows(db):
+        if prob is None or c.customer_id in seen or not (lo <= float(prob) < hi):
+            continue
+        seen.add(c.customer_id)
+        top_reason = next(
+            (f["feature"] for f in (top_features or [])
+             if isinstance(f, dict) and (f.get("shap_value") or 0) > 0),
+            None,
+        )
+        monthly = _num(c.monthly_charges) or 0.0
+        out.append({
+            "customer_id": c.customer_id,
+            "tenure": c.tenure,
+            "contract": c.contract,
+            "internet_service": c.internet_service,
+            "payment_method": c.payment_method,
+            "monthly_charges": monthly,
+            "churn_probability": float(prob),
+            "top_reason": top_reason,
+            "revenue_at_risk": round(float(prob) * monthly, 2),
+        })
+    out.sort(key=lambda r: -r["revenue_at_risk"])
+    return {"level": level, "total": len(out), "customers": out[:limit]}
+
+
+@router.get("/analytics")
+def dashboard_analytics(db: Session = Depends(get_db)):
+    """Agregados para el dashboard: clientes, servicios, predicciones y modelo."""
+    rows = [(c, prob, pred) for c, prob, pred, _ in _latest_rows(db)]
 
     records = []
     for c, prob, pred in rows:
@@ -218,6 +261,9 @@ def dashboard_analytics(db: Session = Depends(get_db)):
 
         predictions_block.update(
             customers_scored=int(df["churn_probability"].notna().sum()),
+            revenue_at_risk=round(float(
+                df.loc[df["churn_prediction"].fillna(False).astype(bool), "monthly_charges"].sum()
+            ), 2),
             predicted_churn=int(df["churn_prediction"].fillna(False).astype(bool).sum()),
             avg_probability=round(float(df["churn_probability"].dropna().mean()), 4),
             by_type=preds["type"].value_counts().to_dict(),
