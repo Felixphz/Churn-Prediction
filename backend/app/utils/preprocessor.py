@@ -38,23 +38,33 @@ EXPECTED_FEATURE_NAMES = [
 ]
 
 
-def preprocess_customer(customer_data: dict) -> pd.DataFrame:
-    """Transform raw customer data to the 30-feature format expected by the model.
+def preprocess_customers(records: list[dict]) -> pd.DataFrame:
+    """Transform raw customer rows to the 30-feature format expected by the model.
 
-    Reproduces the columns of pd.get_dummies(drop_first=True) from data_preprocessing.ipynb.
-    The dummies are built explicitly from EXPECTED_FEATURE_NAMES: calling get_dummies on a
-    single row would drop its only category (drop_first) and zero out every categorical.
+    Equivalent to pd.get_dummies(drop_first=True).astype(int) from data_preprocessing.ipynb,
+    but builds each dummy explicitly from EXPECTED_FEATURE_NAMES. Calling get_dummies on a
+    single row would drop its only category and leave every categorical feature at 0.
     """
-    row = {
-        "SeniorCitizen": int(customer_data.get("SeniorCitizen") or 0),
-        "tenure": int(customer_data.get("tenure") or 0),
-        "MonthlyCharges": float(customer_data.get("MonthlyCharges") or 0.0),
-        "TotalCharges": float(customer_data.get("TotalCharges") or 0.0),
-    }
-    for feature in EXPECTED_FEATURE_NAMES:
-        if feature in row:
-            continue
-        col, category = feature.split("_", 1)
-        row[feature] = int(str(customer_data.get(col)) == category)
+    df = pd.DataFrame([{col: r.get(col) for col in FEATURE_COLUMNS} for r in records])
 
-    return pd.DataFrame([row], columns=EXPECTED_FEATURE_NAMES)
+    # Ensure numeric types
+    df["SeniorCitizen"] = df["SeniorCitizen"].astype(int)
+    df["tenure"] = df["tenure"].astype(int)
+    df["MonthlyCharges"] = df["MonthlyCharges"].astype(float)
+    df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce").fillna(0.0)
+
+    encoded = {}
+    for name in EXPECTED_FEATURE_NAMES:
+        if name in NUMERICAL_COLUMNS:
+            encoded[name] = df[name]
+        else:
+            col, value = name.split("_", 1)
+            encoded[name] = df[col] == value
+
+    # astype(int) as in the notebook (it also truncates MonthlyCharges/TotalCharges)
+    return pd.DataFrame(encoded, columns=EXPECTED_FEATURE_NAMES).astype(int)
+
+
+def preprocess_customer(customer_data: dict) -> pd.DataFrame:
+    """Single-customer version of preprocess_customers."""
+    return preprocess_customers([customer_data])

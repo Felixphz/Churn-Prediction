@@ -126,22 +126,63 @@ class ModelLoader:
         cls._last_alias_check = 0.0
 
 
-def predict_customer(customer_data: dict, threshold: float = 0.3) -> dict:
-    """Run prediction + SHAP for a single customer."""
-    model = ModelLoader.get_model()
+def _shap_matrix(explainer, X: pd.DataFrame):
+    """Return (n_rows, n_features) SHAP array for the churn class and its base value."""
+    shap_values = explainer.shap_values(X)
+    # shap_values: (n, n_features) array, (n, n_features, 2) array, or [class0, class1] list
+    if isinstance(shap_values, list):
+        sv = np.asarray(shap_values[1])
+    else:
+        sv = np.asarray(shap_values)
+        if sv.ndim == 3:
+            sv = sv[:, :, 1]
+    sv = sv.reshape(len(X), -1)
 
-    X = preprocess_customer(customer_data)
+    base_value = explainer.expected_value
+    if isinstance(base_value, (list, np.ndarray)):
+        base_arr = np.asarray(base_value, dtype=float).ravel()
+        base_value = float(base_arr[1]) if base_arr.size > 1 else float(base_arr[0])
+    else:
+        base_value = float(base_value)
+    return sv, base_value
 
-    # Predict — always available, independent of explainability
-    proba = model.predict_proba(X)[0]
-    churn_prob = float(proba[1])
-    churn_pred = churn_prob >= threshold
 
-    prediction = {
-        "churn_probability": round(churn_prob, 4),
-        "churn_predicted": bool(churn_pred),
-        "threshold": threshold,
+def _shap_payload(sv_row, base_value: float) -> dict:
+    """Build SHAP dict, top features and base value for one row."""
+    all_shap = {name: round(float(val), 6) for name, val in zip(EXPECTED_FEATURE_NAMES, sv_row)}
+
+    # Top features by absolute impact
+    sorted_features = sorted(all_shap.items(), key=lambda x: abs(x[1]), reverse=True)
+    top_features = [
+        {
+            "feature": name,
+            "shap_value": val,
+            "direction": "increases churn" if val > 0 else "decreases churn",
+        }
+        for name, val in sorted_features[:10]
+    ]
+    return {
+        "top_features": top_features,
+        "all_shap_values": all_shap,
+        "base_value": round(base_value, 6),
+        "shap_available": True,
     }
+
+
+def _no_shap_payload(reason: str) -> dict:
+    return {
+        "top_features": [],
+        "all_shap_values": {},
+        "base_value": None,
+        "shap_available": False,
+        "shap_unavailable_reason": reason,
+    }
+
+
+def predict_frame(X: pd.DataFrame, threshold: float = 0.3) -> list[dict]:
+    """Vectorized prediction + SHAP for several preprocessed rows."""
+    model = ModelLoader.get_model()
+    probs = model.predict_proba(X)[:, 1]
 
     # SHAP — degrades gracefully so a failing explainer never breaks prediction
     try:
@@ -150,51 +191,24 @@ def predict_customer(customer_data: dict, threshold: float = 0.3) -> dict:
             raise RuntimeError(
                 ModelLoader._explainer_error or "SHAP explainer unavailable"
             )
-
-        shap_values = explainer.shap_values(X)
-        # shap_values: (1, n_features) array, or [class0, class1] list for binary classifiers
-        if isinstance(shap_values, list):
-            sv = shap_values[1][0] if np.ndim(shap_values[1]) > 1 else shap_values[1]
-        else:
-            sv = np.asarray(shap_values)
-            if sv.ndim > 1:
-                sv = sv[0]
-
-        base_value = explainer.expected_value
-        if isinstance(base_value, (list, np.ndarray)):
-            base_arr = np.asarray(base_value, dtype=float).ravel()
-            base_value = float(base_arr[1]) if base_arr.size > 1 else float(base_arr[0])
-        else:
-            base_value = float(base_value)
-
-        # Build SHAP dict: feature_name -> value
-        all_shap = {name: round(float(val), 6) for name, val in zip(EXPECTED_FEATURE_NAMES, sv)}
-
-        # Top features by absolute impact
-        sorted_features = sorted(all_shap.items(), key=lambda x: abs(x[1]), reverse=True)
-        top_features = [
-            {
-                "feature": name,
-                "shap_value": val,
-                "direction": "increases churn" if val > 0 else "decreases churn",
-            }
-            for name, val in sorted_features[:10]
-        ]
-
-        prediction.update({
-            "top_features": top_features,
-            "all_shap_values": all_shap,
-            "base_value": round(base_value, 6),
-            "shap_available": True,
-        })
+        sv, base_value = _shap_matrix(explainer, X)
+        explanations = [_shap_payload(row, base_value) for row in sv]
     except Exception as e:
         print(f"SHAP unavailable, returning prediction without explanation: {e}")
-        prediction.update({
-            "top_features": [],
-            "all_shap_values": {},
-            "base_value": None,
-            "shap_available": False,
-            "shap_unavailable_reason": str(e),
-        })
+        explanations = [_no_shap_payload(str(e))] * len(X)
 
-    return prediction
+    results = []
+    for prob, expl in zip(probs, explanations):
+        churn_prob = float(prob)
+        results.append({
+            "churn_probability": round(churn_prob, 4),
+            "churn_predicted": bool(churn_prob >= threshold),
+            "threshold": threshold,
+            **expl,
+        })
+    return results
+
+
+def predict_customer(customer_data: dict, threshold: float = 0.3) -> dict:
+    """Run prediction + SHAP for a single customer."""
+    return predict_frame(preprocess_customer(customer_data), threshold)[0]

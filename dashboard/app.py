@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -959,19 +960,28 @@ def render_customers():
 
 # ----------------------------------------------------------- Mantenimiento
 def run_batch():
-    with st.spinner("Analizando a todos los clientes… puede tardar unos minutos."):
-        try:
-            res = requests.post(f"{API_URL}/api/v1/predictions/batch", timeout=180)
-        except Exception:  # noqa: BLE001
-            connection_error()
-            return
-    if res.status_code == 200:
+    try:
+        res = requests.post(f"{API_URL}/api/v1/predictions/batch", timeout=60)
+        res.raise_for_status()
         r = res.json()
-        load_analytics.clear()
-        st.success(f"Listo: se analizaron {r['total_customers']:,} clientes; "
+        bar = st.progress(0.0, text="Analizando a todos los clientes…")
+        while r["status"] == "running":
+            time.sleep(3)
+            r = requests.get(
+                f"{API_URL}/api/v1/predictions/batch/{r['batch_run_id']}", timeout=60
+            ).json()
+            if r["total_customers"]:
+                bar.progress(min(r["processed"] / r["total_customers"], 1.0),
+                             text=f"Analizando… {r['processed']:,} de {r['total_customers']:,} clientes")
+    except Exception:  # noqa: BLE001
+        connection_error()
+        return
+    load_analytics.clear()
+    if r["status"] == "completed":
+        st.success(f"Listo: se analizaron {r['processed']:,} clientes; "
                    f"{r['churn_predicted']:,} están en riesgo.")
     else:
-        st.error("El análisis no se pudo completar.")
+        st.error(f"El análisis no se pudo completar: {r.get('error_message') or r['status']}")
 
 
 def render_maintenance():

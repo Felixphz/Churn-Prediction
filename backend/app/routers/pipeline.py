@@ -6,16 +6,47 @@ from app.schemas.pipeline import (
     RetrainStatusResponse,
     RetrainHistoryResponse,
 )
-from app.utils.batch_predictor import run_batch_predictions
+from sqlalchemy import func
+from app.utils.batch_predictor import BATCH_RUNS, start_batch_predictions
+from app.models.customer import Customer
+from app.models.prediction import Prediction
 from app.models.retrain_history import RetrainHistory
 
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
 
 
-@router.post("/predictions/batch", response_model=BatchPredictResponse)
-def run_batch(db: Session = Depends(get_db)):
-    result = run_batch_predictions(db)
-    return result
+@router.post("/predictions/batch", response_model=BatchPredictResponse, status_code=202)
+def run_batch():
+    """Lanza el batch en segundo plano; consultar el avance en GET /predictions/batch/{id}."""
+    return start_batch_predictions()
+
+
+@router.get("/predictions/batch/{batch_run_id}", response_model=BatchPredictResponse)
+def batch_status(batch_run_id: str, db: Session = Depends(get_db)):
+    if batch_run_id in BATCH_RUNS:
+        return BATCH_RUNS[batch_run_id]
+
+    # Batch de un proceso anterior (p. ej. tras un reinicio): reconstruir desde la BD
+    processed, churn = (
+        db.query(
+            func.count(Prediction.id),
+            func.count(Prediction.id).filter(Prediction.churn_prediction == True),
+        )
+        .filter(Prediction.batch_run_id == batch_run_id)
+        .one()
+    )
+    if not processed:
+        raise HTTPException(status_code=404, detail="Batch run not found")
+    total = db.query(func.count(Customer.id)).scalar() or 0
+    return {
+        "batch_run_id": batch_run_id,
+        "status": "completed" if processed >= total else "incomplete",
+        "total_customers": total,
+        "processed": processed,
+        "churn_predicted": churn,
+        "churn_rate": round(churn / processed * 100, 2),
+        "errors": 0,
+    }
 
 
 @router.get("/retrain/status", response_model=RetrainStatusResponse)

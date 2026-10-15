@@ -11,16 +11,28 @@ from app.schemas.pipeline import DashboardSummary
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
+def _latest_prediction_ids(db: Session):
+    """Subconsulta con el id de la última predicción de cada cliente."""
+    return (
+        db.query(func.max(Prediction.id).label("id"))
+        .group_by(Prediction.customer_id)
+        .subquery()
+    )
+
+
 @router.get("/summary", response_model=DashboardSummary)
 def dashboard_summary(db: Session = Depends(get_db)):
     total_customers = db.query(func.count(Customer.id)).scalar() or 0
     total_predictions = db.query(func.count(Prediction.id)).scalar() or 0
 
-    churn_count = (
-        db.query(func.count(Prediction.id))
-        .filter(Prediction.churn_prediction == True)
-        .scalar()
-        or 0
+    latest = _latest_prediction_ids(db)
+    customers_scored, churn_count = (
+        db.query(
+            func.count(Prediction.id),
+            func.count(Prediction.id).filter(Prediction.churn_prediction == True),
+        )
+        .join(latest, latest.c.id == Prediction.id)
+        .one()
     )
 
     active_model = db.query(ModelRegistry).filter(ModelRegistry.is_active == True).first()
@@ -31,10 +43,13 @@ def dashboard_summary(db: Session = Depends(get_db)):
         .first()
     )
 
-    churn_rate = round(churn_count / total_customers * 100, 2) if total_customers > 0 else 0
+    # % sobre los clientes evaluados; coverage_pct indica qué fracción del total lo está
+    churn_rate = round(churn_count / customers_scored * 100, 2) if customers_scored else 0
 
     return DashboardSummary(
         total_customers=total_customers,
+        customers_scored=customers_scored,
+        coverage_pct=round(customers_scored / total_customers * 100, 2) if total_customers else 0,
         churn_count=churn_count,
         churn_rate=churn_rate,
         active_model=active_model.model_name if active_model else None,
@@ -93,14 +108,7 @@ def _segment_stats(df: pd.DataFrame, col: str) -> list[dict]:
 
 def _latest_rows(db: Session):
     """Cada cliente con su última predicción: (Customer, prob, pred, top_features)."""
-    latest = (
-        db.query(
-            Prediction.customer_id.label("cid"),
-            func.max(Prediction.predicted_at).label("last_at"),
-        )
-        .group_by(Prediction.customer_id)
-        .subquery()
-    )
+    latest = _latest_prediction_ids(db)
     return (
         db.query(
             Customer,
@@ -108,12 +116,9 @@ def _latest_rows(db: Session):
             Prediction.churn_prediction,
             Prediction.top_features,
         )
-        .outerjoin(latest, latest.c.cid == Customer.id)
-        .outerjoin(
-            Prediction,
-            (Prediction.customer_id == latest.c.cid)
-            & (Prediction.predicted_at == latest.c.last_at),
-        )
+        .outerjoin(Prediction, Prediction.customer_id == Customer.id)
+        .outerjoin(latest, latest.c.id == Prediction.id)
+        .filter((Prediction.id == None) | (latest.c.id != None))  # noqa: E711
         .all()
     )
 
@@ -259,12 +264,17 @@ def dashboard_analytics(db: Session = Depends(get_db)):
                     feat_n[name] = feat_n.get(name, 0) + 1
         n_preds = max(len(preds), 1)
 
+        at_risk = df["churn_prediction"].fillna(False).astype(bool)
+        customers_scored = int(df["churn_probability"].notna().sum())
+        total_revenue = float(df["monthly_charges"].sum())
+        at_risk_revenue = float(df.loc[at_risk, "monthly_charges"].sum())
         predictions_block.update(
-            customers_scored=int(df["churn_probability"].notna().sum()),
-            revenue_at_risk=round(float(
-                df.loc[df["churn_prediction"].fillna(False).astype(bool), "monthly_charges"].sum()
-            ), 2),
-            predicted_churn=int(df["churn_prediction"].fillna(False).astype(bool).sum()),
+            customers_scored=customers_scored,
+            coverage_pct=round(customers_scored / len(df) * 100, 2) if len(df) else 0,
+            predicted_churn=int(at_risk.sum()),
+            churn_rate=round(float(at_risk.sum()) / customers_scored * 100, 2) if customers_scored else None,
+            revenue_at_risk=round(at_risk_revenue, 2),
+            revenue_at_risk_pct=round(at_risk_revenue / total_revenue * 100, 2) if total_revenue else 0,
             avg_probability=round(float(df["churn_probability"].dropna().mean()), 4),
             by_type=preds["type"].value_counts().to_dict(),
             by_model=preds["model"].value_counts().to_dict(),

@@ -5,13 +5,16 @@ from typing import Optional
 
 class BatchPredictResponse(BaseModel):
     batch_run_id: str
+    status: str  # running | completed | failed
     total_customers: int
+    processed: int
     churn_predicted: int
     churn_rate: float
     errors: int
-    started_at: str
-    finished_at: str
-    duration_seconds: float
+    error_message: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    duration_seconds: Optional[float] = None
 
 
 class RetrainStatusResponse(BaseModel):
@@ -39,6 +42,8 @@ class RetrainHistoryResponse(BaseModel):
 
 class DashboardSummary(BaseModel):
     total_customers: int
+    customers_scored: int
+    coverage_pct: float
     churn_count: int
     churn_rate: float
     active_model: Optional[str]
