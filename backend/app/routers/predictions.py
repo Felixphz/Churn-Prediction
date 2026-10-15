@@ -3,12 +3,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.prediction import (
     PredictRequest,
+    PredictFromDataRequest,
     PredictionResponse,
     PredictionHistoryItem,
     PredictionListResponse,
 )
 from app.services.prediction_service import (
     predict_on_demand,
+    predict_from_data,
     get_prediction_history,
     get_latest_prediction,
 )
@@ -22,6 +24,13 @@ def run_prediction(request: PredictRequest, db: Session = Depends(get_db)):
     if result is None:
         raise HTTPException(status_code=404, detail="Customer not found")
     return result
+
+
+@router.post("/predict-data")
+def run_prediction_from_data(request: PredictFromDataRequest, db: Session = Depends(get_db)):
+    data = request.model_dump()
+    threshold = data.pop("threshold")
+    return predict_from_data(db, data, threshold)
 
 
 @router.get("/{customer_id}")

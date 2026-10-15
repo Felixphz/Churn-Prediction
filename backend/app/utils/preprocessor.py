@@ -41,25 +41,20 @@ EXPECTED_FEATURE_NAMES = [
 def preprocess_customer(customer_data: dict) -> pd.DataFrame:
     """Transform raw customer data to the 30-feature format expected by the model.
 
-    Replicates the exact pd.get_dummies(drop_first=True) from data_preprocessing.ipynb.
+    Reproduces the columns of pd.get_dummies(drop_first=True) from data_preprocessing.ipynb.
+    The dummies are built explicitly from EXPECTED_FEATURE_NAMES: calling get_dummies on a
+    single row would drop its only category (drop_first) and zero out every categorical.
     """
-    raw = {col: customer_data.get(col) for col in FEATURE_COLUMNS}
+    row = {
+        "SeniorCitizen": int(customer_data.get("SeniorCitizen") or 0),
+        "tenure": int(customer_data.get("tenure") or 0),
+        "MonthlyCharges": float(customer_data.get("MonthlyCharges") or 0.0),
+        "TotalCharges": float(customer_data.get("TotalCharges") or 0.0),
+    }
+    for feature in EXPECTED_FEATURE_NAMES:
+        if feature in row:
+            continue
+        col, category = feature.split("_", 1)
+        row[feature] = int(str(customer_data.get(col)) == category)
 
-    # Ensure numeric types
-    raw["SeniorCitizen"] = int(raw["SeniorCitizen"])
-    raw["tenure"] = int(raw["tenure"])
-    raw["MonthlyCharges"] = float(raw["MonthlyCharges"])
-    raw["TotalCharges"] = float(raw["TotalCharges"]) if raw["TotalCharges"] else 0.0
-
-    df = pd.DataFrame([raw])
-
-    # One-Hot Encoding — must match notebook exactly: get_dummies on cat_cols, drop_first=True
-    df_encoded = pd.get_dummies(df, columns=CATEGORICAL_COLUMNS, drop_first=True).astype(int)
-
-    # Align columns to the expected 30 features (fill missing with 0)
-    for col in EXPECTED_FEATURE_NAMES:
-        if col not in df_encoded.columns:
-            df_encoded[col] = 0
-
-    df_encoded = df_encoded[EXPECTED_FEATURE_NAMES]
-    return df_encoded
+    return pd.DataFrame([row], columns=EXPECTED_FEATURE_NAMES)

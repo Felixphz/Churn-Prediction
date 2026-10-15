@@ -109,3 +109,49 @@ def get_latest_prediction(db: Session, customer_id: str):
         .order_by(Prediction.predicted_at.desc())
         .first()
     )
+
+
+def predict_from_data(db: Session, data: dict, threshold: float = 0.3) -> dict:
+    """Predicción para datos ingresados a mano (simulación): no se guarda en la base."""
+    customer_data = {
+        "gender": data["gender"],
+        "SeniorCitizen": int(data["senior_citizen"]),
+        "Partner": data["partner"],
+        "Dependents": data["dependents"],
+        "tenure": data["tenure"],
+        "PhoneService": data["phone_service"],
+        "MultipleLines": data["multiple_lines"],
+        "InternetService": data["internet_service"],
+        "OnlineSecurity": data["online_security"],
+        "OnlineBackup": data["online_backup"],
+        "DeviceProtection": data["device_protection"],
+        "TechSupport": data["tech_support"],
+        "StreamingTV": data["streaming_tv"],
+        "StreamingMovies": data["streaming_movies"],
+        "Contract": data["contract"],
+        "PaperlessBilling": data["paperless_billing"],
+        "PaymentMethod": data["payment_method"],
+        "MonthlyCharges": float(data["monthly_charges"]),
+        "TotalCharges": float(data["total_charges"]),
+    }
+    result = _predict_customer(customer_data, threshold)
+
+    active_model = get_active_model(db)
+    return {
+        "customer_id": None,
+        "prediction": {
+            "churn_probability": result["churn_probability"],
+            "churn_predicted": result["churn_predicted"],
+            "threshold": threshold,
+            "model": active_model.model_name if active_model else "GradientBoosting",
+            "model_version": active_model.model_version if active_model else None,
+        },
+        "explainability": {
+            "top_features": result["top_features"],
+            "base_value": result["base_value"],
+            "all_shap_values": result["all_shap_values"],
+            "shap_available": result.get("shap_available", True),
+        },
+        "predicted_at": datetime.utcnow().isoformat(),
+        "prediction_type": "simulation",
+    }
