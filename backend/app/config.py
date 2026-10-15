@@ -4,7 +4,7 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     # Database
-    DATABASE_URL: str = "postgresql://user:password@localhost:5432/churn_prediction"
+    DATABASE_URL: str = "postgresql+psycopg2://user:password@localhost:5432/churn_prediction"
     DB_USER: str = "user"
     DB_PASSWORD: str = "password"
 

@@ -14,7 +14,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-user} -d churn_prediction"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 12
 
   mlflow:
     build: ./infra/mlflow
@@ -22,10 +22,12 @@ services:
     environment:
       DB_USER: ${DB_USER:-user}
       DB_PASSWORD: ${DB_PASSWORD:-password}
+      MLFLOW_ARTIFACTS_DESTINATION: /mlflow/artifacts
     command: >
       mlflow server
       --backend-store-uri postgresql://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/mlflow
-      --default-artifact-root /mlflow/artifacts
+      --serve-artifacts
+      --artifacts-destination /mlflow/artifacts
       --host 0.0.0.0
       --port 5000
     ports:
@@ -45,10 +47,11 @@ services:
     build: ./backend
     container_name: churn-api
     environment:
-      DATABASE_URL: postgresql://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/churn_prediction
+      DATABASE_URL: postgresql+psycopg2://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/churn_prediction
       MLFLOW_TRACKING_URI: http://mlflow:5000
       ENVIRONMENT: development
       MODEL_THRESHOLD: "0.30"
+      ENABLE_SCHEDULER: "false"
     ports:
       - "8000:8000"
     volumes:
@@ -67,6 +70,8 @@ services:
       API_URL: http://api:8000
     ports:
       - "8501:8501"
+    volumes:
+      - ./dashboard:/app
     depends_on:
       - api
 
