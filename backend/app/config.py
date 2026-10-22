@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Model
     MODEL_THRESHOLD: float = 0.30
-    DEFAULT_MODEL: str = "GradientBoosting"
+    DEFAULT_MODEL: str = "LogisticRegression"
 
     # Retrain
     RETRAIN_MIN_IMPROVEMENT: float = 0.01

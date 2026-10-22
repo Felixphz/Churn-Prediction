@@ -1,19 +1,32 @@
-import uuid
+"""Monthly retraining, following the protocol of the study (docs/paper/articulo.tex):
+
+- Train on the ORIGINAL training split; any resampling lives inside an imblearn
+  pipeline, so it is applied only to the training folds of each CV iteration.
+- Candidates are compared by cross-validated F1-macro (never by the test set).
+- The active model is re-scored on the same folds, so the promotion gate is a
+  like-for-like comparison.
+- The test split is used only to report metrics of the model that is kept.
+"""
+from __future__ import annotations
+
 import os
 import sys
+import uuid
 from datetime import datetime
 
-import pandas as pd
-import numpy as np
 import joblib
 import mlflow
 import mlflow.sklearn
+import pandas as pd
+import xgboost
+from imblearn.combine import SMOTEENN
+from imblearn.over_sampling import SMOTE, RandomOverSampler
+from imblearn.pipeline import Pipeline
+from sklearn.base import clone
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import GaussianNB
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
-from sklearn.metrics import f1_score, recall_score, roc_auc_score
-import xgboost
+from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score
 
 # Add parent to path for app imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,182 +38,212 @@ from app.config import get_settings
 
 settings = get_settings()
 
-MODELS = {
-    "LogisticRegression": LogisticRegression(max_iter=1000, random_state=42),
-    "RandomForest": RandomForestClassifier(random_state=42),
-    "NaiveBayes": GaussianNB(),
-    "XGBoost": xgboost.XGBClassifier(random_state=42, eval_metric="logloss"),
-    "GradientBoosting": GradientBoostingClassifier(random_state=42),
-}
-
-PARAM_GRIDS = {
-    "LogisticRegression": {"C": [0.1, 1], "penalty": ["l2"], "solver": ["liblinear"]},
-    "RandomForest": {"n_estimators": [100, 200], "max_depth": [10, 20]},
-    "NaiveBayes": {"var_smoothing": [1e-9, 1e-8]},
-    "XGBoost": {"n_estimators": [100, 200], "max_depth": [3, 5], "learning_rate": [0.1]},
-    "GradientBoosting": {"n_estimators": [100, 200], "max_depth": [3, 5], "learning_rate": [0.1]},
-}
-
 DATA_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "..", "ml_pipeline", "data", "resampled"
+    os.path.dirname(__file__), "..", "..", "ml_pipeline", "data", "resampled", "original"
 )
+RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "ml_pipeline", "data", "results")
+CV_FOLDS = 5
+SEED = 42
+
+# Final model selected in the study: Logistic Regression, no resampling, C=1, L1.
+FINAL_MODEL_NAME = "LogisticRegression"
+
+
+def final_model():
+    return LogisticRegression(C=1, penalty="l1", solver="liblinear", max_iter=1000, random_state=SEED)
+
+
+# name -> (estimator, sampler or None, param grid). Each family uses the resampling
+# strategy that worked best for it in the study.
+CANDIDATES = {
+    "LogisticRegression": (
+        LogisticRegression(solver="liblinear", max_iter=1000, random_state=SEED),
+        None,
+        {"C": [0.1, 1, 10], "penalty": ["l1", "l2"]},
+    ),
+    "RandomForest": (
+        RandomForestClassifier(random_state=SEED, n_jobs=-1),
+        RandomOverSampler(random_state=SEED),
+        {"n_estimators": [100, 200], "max_depth": [10, 20]},
+    ),
+    "XGBoost": (
+        xgboost.XGBClassifier(random_state=SEED, eval_metric="logloss"),
+        SMOTE(random_state=SEED),
+        {"n_estimators": [100, 200], "max_depth": [3, 5], "learning_rate": [0.1]},
+    ),
+    "GradientBoosting": (
+        GradientBoostingClassifier(random_state=SEED),
+        SMOTEENN(random_state=SEED),
+        {"n_estimators": [100, 200], "max_depth": [3, 5], "learning_rate": [0.1]},
+    ),
+}
+
+
+def load_data():
+    X_train = pd.read_csv(os.path.join(DATA_DIR, "X_train.csv"))
+    y_train = pd.read_csv(os.path.join(DATA_DIR, "y_train.csv"))["Churn"]
+    X_test = pd.read_csv(os.path.join(DATA_DIR, "X_test.csv"))
+    y_test = pd.read_csv(os.path.join(DATA_DIR, "y_test.csv"))["Churn"]
+    return X_train, y_train, X_test, y_test
+
+
+def cv_splitter():
+    return StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=SEED)
+
+
+def with_background(model, X_train: pd.DataFrame):
+    """Attach the training mean as SHAP background (used by LinearExplainer at serving time)."""
+    model.shap_background_ = X_train.mean().to_frame().T
+    return model
+
+
+def test_metrics(model, X_test, y_test) -> dict:
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1]
+    return {
+        "f1_macro": f1_score(y_test, y_pred, average="macro"),
+        "recall": recall_score(y_test, y_pred),
+        "precision": precision_score(y_test, y_pred),
+        "auc_roc": roc_auc_score(y_test, y_proba),
+    }
+
+
+def register_in_mlflow(model, name: str, params: dict, metrics: dict, run_name: str):
+    """Log + register the model and point the production alias to it. Returns the run id."""
+    mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
+    mlflow.set_experiment("churn_prediction")
+    with mlflow.start_run(run_name=run_name) as run:
+        mlflow.log_params(params)
+        mlflow.log_metrics(metrics)
+        mlflow.sklearn.log_model(model, name="model", serialization_format="cloudpickle")
+        run_id = run.info.run_id
+
+    version = mlflow.register_model(f"runs:/{run_id}/model", settings.REGISTRY_MODEL_NAME)
+    mlflow.MlflowClient().set_registered_model_alias(
+        settings.REGISTRY_MODEL_NAME, settings.MODEL_ALIAS, version.version
+    )
+    print(f"MLflow Registry: {settings.REGISTRY_MODEL_NAME} v{version.version} -> @{settings.MODEL_ALIAS}")
+    return run_id
+
+
+def activate_in_db(db, name: str, version: str, params: dict, metrics: dict, resampling: str | None):
+    for m in db.query(ModelRegistry).filter(ModelRegistry.is_active == True).all():
+        m.is_active = False
+    db.add(ModelRegistry(
+        model_name=name,
+        model_version=version,
+        f1_score=metrics["f1_macro"],
+        recall=metrics["recall"],
+        precision_score=metrics["precision"],
+        auc_roc=metrics["auc_roc"],
+        resampling_strategy=resampling or "none",
+        hyperparameters=params,
+        threshold=settings.MODEL_THRESHOLD,
+        is_active=True,
+        activated_at=datetime.utcnow(),
+    ))
+
+
+def active_model_cv_f1(X_train, y_train):
+    """CV F1-macro of the model currently in production, refit on the same folds."""
+    model = mlflow.sklearn.load_model(f"models:/{settings.REGISTRY_MODEL_NAME}@{settings.MODEL_ALIAS}")
+    scores = cross_val_score(clone(model), X_train, y_train, cv=cv_splitter(), scoring="f1_macro")
+    return float(scores.mean())
 
 
 def run_retrain():
     db = SessionLocal()
     run_id = str(uuid.uuid4())[:8]
-    started_at = datetime.utcnow()
-
-    history = RetrainHistory(
-        run_id=run_id,
-        started_at=started_at,
-        status="running",
-    )
+    history = RetrainHistory(run_id=run_id, started_at=datetime.utcnow(), status="running")
     db.add(history)
     db.commit()
 
     try:
-        # Load data
-        X_train = pd.read_csv(os.path.join(DATA_DIR, "smote_enn", "X_train.csv"))
-        y_train = pd.read_csv(os.path.join(DATA_DIR, "smote_enn", "y_train.csv"))["Churn"]
-        X_test = pd.read_csv(os.path.join(DATA_DIR, "original", "X_test.csv"))
-        y_test = pd.read_csv(os.path.join(DATA_DIR, "original", "y_test.csv"))["Churn"]
-
+        X_train, y_train, X_test, y_test = load_data()
         history.total_customers = len(X_train) + len(X_test)
         history.train_samples = len(X_train)
         history.test_samples = len(X_test)
 
-        # Train models
-        best_f1 = 0
-        best_model_name = None
-        best_model = None
-        best_params = None
-        models_evaluated = 0
+        mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
 
-        try:
-            mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
-        except Exception as e:
-            print(f"MLflow connection failed, continuing without tracking: {e}")
-
-        for name, model in MODELS.items():
+        # 1. Select the best candidate by cross-validated F1-macro
+        best = None
+        for name, (estimator, sampler, grid) in CANDIDATES.items():
             print(f"Training {name}...")
-            param_grid = PARAM_GRIDS[name]
+            if sampler is None:
+                model, param_grid = estimator, grid
+            else:
+                model = Pipeline([("sampler", sampler), ("clf", estimator)])
+                param_grid = {f"clf__{k}": v for k, v in grid.items()}
 
-            cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
-            grid_search = GridSearchCV(
-                model, param_grid, cv=cv, scoring="f1_macro", n_jobs=-1, verbose=0
-            )
-            grid_search.fit(X_train, y_train)
+            search = GridSearchCV(model, param_grid, cv=cv_splitter(), scoring="f1_macro", n_jobs=-1)
+            search.fit(X_train, y_train)
+            print(f"  {name}: CV F1-macro={search.best_score_:.4f} {search.best_params_}")
 
-            y_pred = grid_search.predict(X_test)
-            y_proba = grid_search.predict_proba(X_test)[:, 1]
-
-            f1 = f1_score(y_test, y_pred, average="macro")
-            recall = recall_score(y_test, y_pred)
-            auc = roc_auc_score(y_test, y_proba)
-
-            models_evaluated += 1
-
-            print(f"  {name}: F1={f1:.4f}, Recall={recall:.4f}, AUC={auc:.4f}")
-
-            # Log to MLflow (optional)
             try:
                 with mlflow.start_run(run_name=f"retrain_{name}_{run_id}"):
-                    mlflow.log_params(grid_search.best_params_)
-                    mlflow.log_metrics({"f1_macro": f1, "recall": recall, "auc_roc": auc})
+                    mlflow.log_params(search.best_params_)
+                    mlflow.log_metric("cv_f1_macro", search.best_score_)
             except Exception as e:
                 print(f"  MLflow logging failed: {e}")
 
-            if f1 > best_f1:
-                best_f1 = f1
-                best_model_name = name
-                best_model = grid_search.best_estimator_
-                best_params = grid_search.best_params_
-                best_recall = recall
-                best_auc = auc
+            if best is None or search.best_score_ > best["cv_f1"]:
+                best = {
+                    "name": name,
+                    "cv_f1": float(search.best_score_),
+                    "params": {k.removeprefix("clf__"): v for k, v in search.best_params_.items()},
+                    "sampler": type(sampler).__name__ if sampler else None,
+                    "search": search,
+                }
 
-        history.models_evaluated = models_evaluated
-        history.best_model_name = best_model_name
-        history.best_f1_score = best_f1
-        history.best_recall = best_recall
-        history.best_auc_roc = best_auc
+        history.models_evaluated = len(CANDIDATES)
+        history.best_model_name = best["name"]
 
-        # Compare with active model
-        active = db.query(ModelRegistry).filter(ModelRegistry.is_active == True).first()
+        # Serve the bare classifier: samplers only act at fit time, and SHAP's
+        # tree/linear explainers need the estimator itself, not the pipeline.
+        fitted = best["search"].best_estimator_
+        model = fitted.named_steps["clf"] if isinstance(fitted, Pipeline) else fitted
+        model = with_background(model, X_train)
+        metrics = test_metrics(model, X_test, y_test)
+        history.best_f1_score = metrics["f1_macro"]
+        history.best_recall = metrics["recall"]
+        history.best_auc_roc = metrics["auc_roc"]
+        print(f"Best: {best['name']} (CV F1={best['cv_f1']:.4f}, test F1={metrics['f1_macro']:.4f})")
+
+        # 2. Promotion gate: compare CV F1 against the active model on the same folds
         improved = True
-        if active and active.f1_score:
-            min_improvement = settings.RETRAIN_MIN_IMPROVEMENT
-            if best_f1 <= float(active.f1_score) + min_improvement:
-                improved = False
-                print(f"No improvement: new={best_f1:.4f} vs current={float(active.f1_score):.4f}")
-
+        try:
+            current = active_model_cv_f1(X_train, y_train)
+            improved = best["cv_f1"] > current + settings.RETRAIN_MIN_IMPROVEMENT
+            print(f"Active model CV F1={current:.4f} -> {'promote' if improved else 'keep current'}")
+        except Exception as e:
+            # No model registered yet: the new one becomes the first production model
+            print(f"Could not score the active model ({e}); promoting the new one.")
         history.model_improved = improved
 
         if improved:
-            # Deactivate current model
-            if active:
-                active.is_active = False
+            os.makedirs(RESULTS_DIR, exist_ok=True)
+            joblib.dump(model, os.path.join(RESULTS_DIR, f"best_model_{best['name']}.joblib"))
 
-            # Save model (local artifact for debugging)
-            model_path = os.path.join(
-                os.path.dirname(__file__), "..", "..",
-                "ml_pipeline", "data", "results",
-                f"best_model_{best_model_name}.joblib"
-            )
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            joblib.dump(best_model, model_path)
-
-            # Register in MLflow Model Registry and promote to production alias
             mlflow_run_id = None
             try:
-                mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
-                mlflow.set_experiment("churn_prediction")
-                with mlflow.start_run(run_name=f"register_{best_model_name}_{run_id}") as mlf_run:
-                    mlflow.log_params(best_params)
-                    mlflow.log_metrics(
-                        {"f1_macro": best_f1, "recall": best_recall, "auc_roc": best_auc}
-                    )
-                    mlflow.sklearn.log_model(
-                        best_model, name="model", serialization_format="cloudpickle"
-                    )
-                    mlflow_run_id = mlf_run.info.run_id
-
-                model_version = mlflow.register_model(
-                    f"runs:/{mlflow_run_id}/model", settings.REGISTRY_MODEL_NAME
-                )
-                client = mlflow.MlflowClient()
-                client.set_registered_model_alias(
-                    settings.REGISTRY_MODEL_NAME, settings.MODEL_ALIAS, model_version.version
-                )
-                print(
-                    f"MLflow Registry: {settings.REGISTRY_MODEL_NAME} "
-                    f"v{model_version.version} -> @{settings.MODEL_ALIAS}"
+                mlflow_run_id = register_in_mlflow(
+                    model, best["name"], best["params"],
+                    {**metrics, "cv_f1_macro": best["cv_f1"]},
+                    run_name=f"register_{best['name']}_{run_id}",
                 )
             except Exception as e:
                 print(f"MLflow registration failed (model still active in app DB): {e}")
 
-            # Register new model
-            new_model = ModelRegistry(
-                model_name=best_model_name,
-                model_version=mlflow_run_id or run_id,
-                f1_score=best_f1,
-                recall=best_recall,
-                auc_roc=best_auc,
-                hyperparameters=best_params,
-                threshold=0.3,
-                is_active=True,
-                activated_at=datetime.utcnow(),
-            )
-            db.add(new_model)
+            activate_in_db(db, best["name"], mlflow_run_id or run_id, best["params"], metrics, best["sampler"])
             history.best_model_mlflow_run_id = mlflow_run_id or run_id
-            print(f"New model activated: {best_model_name} (F1={best_f1:.4f})")
+            print(f"New model activated: {best['name']}")
         else:
             print("Keeping current model.")
 
         history.status = "success"
         history.finished_at = datetime.utcnow()
         db.commit()
-
         print(f"\nRetrain completed: {run_id}")
         return history
 

@@ -1,0 +1,524 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-nodecimaldot,es-tabla]{babel}
+\usepackage{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,babel}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.16}
+\usepackage{url}
+
+\renewcommand{\IEEEkeywordsname}{Palabras clave}
+
+% Permite pasar autores a una segunda fila en el bloque de autores
+\makeatletter
+\newcommand{\linebreakand}{%
+  \end{@IEEEauthorhalign}
+  \hfill\mbox{}\par
+  \mbox{}\hfill\begin{@IEEEauthorhalign}
+}
+\makeatother
+
+% Colores de las series del gráfico
+\definecolor{cLR}{HTML}{157699}
+\definecolor{cSVM}{HTML}{B8336A}
+\definecolor{cRF}{HTML}{38BDAC}
+\definecolor{cXGB}{HTML}{1F3B4D}
+\definecolor{cGB}{HTML}{8EC044}
+\definecolor{cKNN}{HTML}{8C8C8C}
+\definecolor{cNB}{HTML}{E8A33D}
+\definecolor{cOrig}{HTML}{C0392B}
+
+\begin{document}
+
+\title{Predicción del abandono de clientes: comparación de modelos de clasificación, estrategias de balanceo y comités de máquinas}
+
+\author{
+\IEEEauthorblockN{Juan Felipe Isaza Valencia}
+\IEEEauthorblockA{Facultad de Ingeniería\\
+Universidad de Antioquia\\
+Medellín, Colombia\\
+juan.isaza6@udea.edu.co}
+\and
+\IEEEauthorblockN{Juan José Garzón Mejía}
+\IEEEauthorblockA{Facultad de Ingeniería\\
+Universidad de Antioquia\\
+Medellín, Colombia\\
+juan.garzonm@udea.edu.co}
+\and
+\IEEEauthorblockN{Natalia Bernal Gutiérrez}
+\IEEEauthorblockA{Facultad de Ingeniería\\
+Universidad de Antioquia\\
+Medellín, Colombia\\
+natalia.bernalg@udea.edu.co}
+\linebreakand
+\IEEEauthorblockN{Antonio Jesús Tamayo Herrera}
+\IEEEauthorblockA{Departamento de Ingeniería de Sistemas\\
+Universidad de Antioquia\\
+Medellín, Colombia\\
+antonio.tamayo@udea.edu.co}
+}
+
+\maketitle
+
+\begin{abstract}
+El abandono de clientes (\emph{churn}) es uno de los principales riesgos financieros para las empresas de servicios con ingresos recurrentes, pues retener a un cliente cuesta menos que adquirir uno nuevo. Este trabajo compara siete clasificadores supervisados (Regresión Logística, SVM, Random Forest, XGBoost, Gradient Boosting, $k$ vecinos más cercanos y Naive Bayes) para predecir el abandono sobre el conjunto de datos IBM Telco Customer Churn (7\,032 clientes, 26,6\,\% de abandono). Cada modelo se entrenó con los datos originales y con seis estrategias de balanceo de clases, para un total de 49 experimentos optimizados con GridSearchCV y evaluados sobre un conjunto de prueba común sin remuestrear. Adicionalmente, se construyó un comité de máquinas con voto mayoritario y voto suave, evaluado mediante validación cruzada \emph{out-of-fold} con el balanceo aplicado dentro de cada partición. El balanceo aumentó el \emph{recall} de la clase abandono en 13,8 puntos porcentuales en promedio, pero no mejoró el F1-macro ($-0{,}001$). La Regresión Logística sin balanceo obtuvo el mejor F1-macro individual (0,740 en prueba) y el mayor AUC-ROC en validación cruzada (0,846); el comité de voto mayoritario la superó por solo 0,004, por lo que se seleccionó la Regresión Logística por su desempeño equivalente, sus probabilidades y su interpretabilidad. Finalmente, se describe la plataforma que pone el modelo en producción: una API REST con registro de modelos en MLflow, explicaciones SHAP por cliente, reentrenamiento mensual y un \emph{dashboard} orientado a usuarios no técnicos que prioriza a quién contactar y simula acciones de retención.
+\end{abstract}
+
+\begin{IEEEkeywords}
+abandono de clientes, aprendizaje automático, clasificación desbalanceada, SMOTE, comité de máquinas, regresión logística, MLOps.
+\end{IEEEkeywords}
+
+% ======================================================================
+\section{Introducción}
+% ======================================================================
+
+Las empresas que operan bajo modelos de ingresos recurrentes, como las de telecomunicaciones, servicios de \emph{streaming}, banca o software como servicio, dependen de la retención de sus clientes para sostener su rentabilidad. La pérdida de clientes, o \emph{churn}, se traduce en menores ingresos recurrentes y en mayores costos de adquisición, ya que atraer a un cliente nuevo resulta considerablemente más costoso que conservar a uno existente.
+
+Anticipar qué clientes tienen alta probabilidad de abandonar permite intervenir a tiempo con estrategias de retención dirigidas. Este problema se formula como una tarea de clasificación binaria supervisada sobre datos tabulares, ampliamente estudiada en la literatura~\cite{lalwani2020review,survey2024decade,review2026systematic}. Sin embargo, muchas pequeñas y medianas empresas no cuentan con herramientas propias, explicables y desplegables que les permitan actuar sobre los factores que determinan el abandono.
+
+Un reto central del problema es el desbalance de clases: los clientes que abandonan son minoría, lo que sesga a los clasificadores hacia la clase mayoritaria. Las técnicas de remuestreo como SMOTE~\cite{chawla2002smote} son una respuesta habitual, pero su efecto real sobre métricas balanceadas como el F1-macro no siempre se evalúa frente a una línea base sin remuestrear.
+
+Este artículo presenta una plataforma de predicción de abandono desarrollada en el curso Proyecto Integrador~I de la Universidad de Antioquia. Sus contribuciones son: una comparación sistemática de siete clasificadores con seis estrategias de balanceo y una línea base sin remuestrear (49 experimentos); una cuantificación del efecto del balanceo sobre el F1-macro y el \emph{recall}; la evaluación de un comité de máquinas con validación \emph{out-of-fold} sin fuga de información; una selección del modelo final que considera, además del desempeño, la interpretabilidad y la utilidad de las probabilidades; y una plataforma desplegable que lleva las predicciones y sus explicaciones a usuarios no técnicos.
+
+% ======================================================================
+\section{Estado del arte}\label{sec:estado}
+% ======================================================================
+
+La predicción del abandono en telecomunicaciones cuenta con una amplia literatura. Diversas revisiones sistemáticas documentan la evolución de las técnicas, los conjuntos de datos y las métricas de evaluación de la última década~\cite{lalwani2020review,survey2024decade,review2026systematic}, y coinciden en que el conjunto IBM Telco Customer Churn~\cite{ibmtelco} es uno de los \emph{benchmarks} más utilizados.
+
+\textbf{Comparación de modelos.} La práctica predominante consiste en comparar varios algoritmos en lugar de proponer uno solo~\cite{hindawi2022detecting,plos2023retention,plos2025predictive,imitec2024ml}. Los ensambles de árboles, como Random Forest~\cite{breiman2001rf}, Gradient Boosting~\cite{friedman2001gbm} y XGBoost~\cite{chen2016xgboost}, son reconocidos por su buen desempeño en datos tabulares con variables mixtas, mientras que la Regresión Logística se mantiene como referencia por su interpretabilidad.
+
+\textbf{Ensambles y comités.} Los ensambles con voto suave y ajuste de hiperparámetros~\cite{acisc2026softvoting,jcs2026developing} reportan valores de AUC superiores al 90\,\%, y los ensambles adaptativos~\cite{arxiv2024adaptive} exploran la combinación dinámica de clasificadores. Estos enfoques se apoyan en la teoría de comités de máquinas~\cite{dietterich2000ensemble,kuncheva2014combining}, según la cual la combinación mejora el desempeño cuando los miembros cometen errores poco correlacionados.
+
+\textbf{Explicabilidad y despliegue.} Se han propuesto marcos de IA explicable que combinan desempeño e interpretación de los factores de riesgo~\cite{plos2026xai}, en general basados en valores SHAP~\cite{lundberg2017shap}, soluciones de extremo a extremo~\cite{cogent2026endtoend}, análisis de supervivencia sobre IBM Telco~\cite{icatam2024survival} y la optimización de campañas de mercadeo a partir de las predicciones~\cite{arxiv2026marketing}.
+
+\textbf{Desbalance de clases.} Las técnicas de remuestreo más usadas son SMOTE~\cite{chawla2002smote}, que genera ejemplos sintéticos por interpolación; ADASYN~\cite{he2008adasyn}, que concentra la generación en las regiones difíciles; y las variantes híbridas SMOTE-Tomek y SMOTE-ENN~\cite{batista2004balancing}, que limpian el solapamiento entre clases. Un riesgo metodológico conocido es aplicar el remuestreo antes de la validación cruzada, lo que contamina las particiones de validación y sobreestima el desempeño~\cite{cawley2010overfitting}.
+
+Este trabajo se diferencia de los anteriores en que evalúa explícitamente el efecto del balanceo frente a una línea base sin remuestrear, compara el comité de máquinas con sus miembros bajo un mismo protocolo sin fuga de información, y lleva el modelo a una herramienta operativa para usuarios no técnicos.
+
+% ======================================================================
+\section{Metodología}\label{sec:metodologia}
+% ======================================================================
+
+El proyecto sigue una adaptación del ciclo CRISP-DM~\cite{shearer2000crisp}. Todo el código se implementó en Python con scikit-learn~\cite{pedregosa2011sklearn}, imbalanced-learn~\cite{lemaitre2017imblearn} y XGBoost~\cite{chen2016xgboost}, y cada experimento se registró en MLflow~\cite{zaharia2018mlflow}.
+
+\subsection{Conjunto de datos}
+
+Se utilizó el conjunto IBM Telco Customer Churn~\cite{ibmtelco}, con 7\,043 clientes y 21 columnas: un identificador, variables demográficas, de servicios contratados y de cuenta (antigüedad, contrato, método de pago, cargos mensuales y totales), y la variable objetivo \texttt{Churn}. Se eliminaron 11 registros con \texttt{TotalCharges} vacío, correspondientes a clientes con antigüedad cero, para un total de 7\,032 clientes, de los cuales el 26,6\,\% abandonó el servicio.
+
+\subsection{Análisis exploratorio}
+
+La asociación de las variables categóricas con el abandono se midió con la V de Cramér~\cite{cramer1946mathematical} con corrección de sesgo~\cite{bergsma2013bias}, que toma valores entre 0 (sin asociación) y 1.
+
+De los 7\,032 clientes, 1\,869 abandonaron (26,6\,\%); este desbalance motivó el uso del F1-macro y la evaluación de estrategias de balanceo. La Tabla~\ref{tab:eda} muestra las variables con mayor asociación. El tipo de contrato es la más relevante: el 42,7\,\% de los clientes con contrato mes a mes abandonó, frente al 2,8\,\% de los clientes con contrato a dos años. Le siguen la ausencia de seguridad en línea y de soporte técnico, el internet por fibra óptica y el pago con cheque electrónico, todos con tasas de abandono superiores al 40\,\%. En contraste, el género y el servicio telefónico ($V=0{,}00$) no mostraron asociación con el abandono.
+
+\begin{table}[!t]
+\caption{Tasa de abandono por categoría en las variables con mayor asociación (V de Cramér)}
+\label{tab:eda}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llrc@{}}
+\toprule
+Variable ($V$) & Categoría & Clientes & Abandono \\
+\midrule
+\multirow{3}{*}{Contrato (0,41)} & Mes a mes & 3\,875 & 42,7\,\% \\
+ & Un año & 1\,472 & 11,3\,\% \\
+ & Dos años & 1\,685 & 2,8\,\% \\
+\midrule
+\multirow{2}{*}{Seg. en línea (0,35)} & No & 3\,497 & 41,8\,\% \\
+ & Sí & 2\,015 & 14,6\,\% \\
+\midrule
+\multirow{2}{*}{Soporte técnico (0,34)} & No & 3\,472 & 41,6\,\% \\
+ & Sí & 2\,040 & 15,2\,\% \\
+\midrule
+\multirow{3}{*}{Internet (0,32)} & Fibra óptica & 3\,096 & 41,9\,\% \\
+ & DSL & 2\,416 & 19,0\,\% \\
+ & Sin internet & 1\,520 & 7,4\,\% \\
+\midrule
+\multirow{2}{*}{Medio de pago (0,30)} & Cheque electrónico & 2\,365 & 45,3\,\% \\
+ & Otros métodos & 4\,667 & 15,3--19,2\,\% \\
+\midrule
+\multirow{2}{*}{Adulto mayor (0,15)} & Sí & 1\,142 & 41,7\,\% \\
+ & No & 5\,890 & 23,7\,\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Entre las numéricas, la antigüedad presentó la mayor correlación con el abandono ($r=-0{,}35$): su mediana fue de 10 meses en quienes abandonaron frente a 38 en quienes permanecieron, y el 55,5\,\% de los abandonos ocurrió en el primer año. Los cargos mensuales mostraron una correlación moderada ($r=0{,}19$). La antigüedad y los cargos totales están fuertemente correlacionados ($r=0{,}83$), multicolinealidad que la regularización L1 de la Regresión Logística ayuda a manejar~\cite{tibshirani1996lasso}. En conjunto, el abandono se concentra en perfiles bien diferenciados por pocas variables, lo que anticipa que modelos simples puedan ser competitivos.
+
+\subsection{Preprocesamiento}
+
+Se seleccionaron 19 variables predictoras, excluyendo el identificador, y la variable objetivo se codificó como 1 (abandona) y 0 (permanece). Las 15 variables categóricas se transformaron mediante codificación \emph{one-hot} eliminando la primera categoría, lo que produjo 30 variables. Los datos se dividieron de forma estratificada en 80\,\% para entrenamiento (5\,625 clientes) y 20\,\% para prueba (1\,407 clientes), ambos con 26,6\,\% de abandono, con semilla fija (\texttt{random\_state}~$=42$).
+
+\subsection{Estrategias de balanceo}
+
+Sobre el conjunto de entrenamiento se aplicaron seis estrategias de remuestreo, además de conservar el original (5\,625 registros) como línea base: SMOTE (8\,260), ADASYN (8\,292), sobremuestreo aleatorio (8\,260), submuestreo aleatorio (2\,990), SMOTE-Tomek (7\,506) y SMOTE-ENN (4\,596). El conjunto de prueba nunca se remuestreó.
+
+\subsection{Modelos y búsqueda de hiperparámetros}
+
+Se evaluaron siete clasificadores: Regresión Logística con regularización L1 o L2~\cite{tibshirani1996lasso}, máquina de vectores de soporte (SVM)~\cite{cortes1995svm}, Random Forest~\cite{breiman2001rf}, XGBoost~\cite{chen2016xgboost}, Gradient Boosting~\cite{friedman2001gbm}, $k$ vecinos más cercanos (KNN)~\cite{cover1967knn} y Naive Bayes gaussiano. KNN y SVM se incluyeron en un \emph{pipeline} con estandarización previa, y las probabilidades del SVM se obtuvieron con el escalado de Platt~\cite{platt1999probabilistic}. La búsqueda incluyó, entre otros, $C$ y la penalización en la Regresión Logística; kernel, $C$ y $\gamma$ en el SVM; número de árboles, profundidad y tasa de aprendizaje en los ensambles; y $k$, pesos y métrica en KNN.
+
+Cada combinación de modelo y conjunto de entrenamiento se optimizó con GridSearchCV usando validación cruzada estratificada de 5 particiones y el F1-macro como criterio, para un total de 49 experimentos. Como exploración previa, se utilizó LazyPredict~\cite{lazypredict} para entrenar 26 clasificadores con su configuración por defecto sobre cada conjunto balanceado.
+
+\subsection{Métricas de evaluación}
+
+Dado el desbalance de clases, se priorizó el F1-macro, que promedia con igual peso el F1 de ambas clases:
+\begin{equation}
+F1_{\text{macro}} = \frac{1}{2}\sum_{c\in\{0,1\}} \frac{2\,P_c\,R_c}{P_c+R_c},
+\end{equation}
+donde $P_c$ y $R_c$ son la precisión y el \emph{recall} de la clase $c$. Se reportan además el \emph{recall} y la precisión de la clase abandono y el área bajo la curva ROC (AUC-ROC), que mide la capacidad del modelo para ordenar a los clientes según su riesgo.
+
+\subsection{Comité de máquinas}
+
+Un comité de máquinas combina las predicciones de $M$ clasificadores~\cite{kuncheva2014combining}. Sea $p_m(\mathbf{x})$ la probabilidad de abandono que el modelo $m$ asigna al cliente $\mathbf{x}$. En el \textbf{voto mayoritario} (\emph{hard}), cada modelo emite una decisión binaria y se predice abandono si la mayoría lo hace:
+\begin{equation}
+\hat{y}_{\text{hard}}(\mathbf{x}) = \mathbb{1}\!\left[\sum_{m=1}^{M} \mathbb{1}\big[p_m(\mathbf{x})\geq 0{,}5\big] > \frac{M}{2}\right].
+\end{equation}
+En el \textbf{voto suave} (\emph{soft}), se promedian las probabilidades y se aplica un umbral $\tau$:
+\begin{equation}
+\hat{p}(\mathbf{x}) = \frac{1}{M}\sum_{m=1}^{M} p_m(\mathbf{x}), \qquad \hat{y}_{\text{soft}}(\mathbf{x}) = \mathbb{1}\big[\hat{p}(\mathbf{x})\geq \tau\big].
+\end{equation}
+
+Se seleccionaron $M=5$ miembros, correspondientes a la mejor configuración de los cinco modelos más competitivos; KNN y Naive Bayes se excluyeron por ser los de menor desempeño. Cada miembro incorpora su propia estrategia de balanceo dentro de un \emph{pipeline} de imbalanced-learn~\cite{lemaitre2017imblearn}, de manera que el remuestreo se aplica únicamente sobre las particiones de entrenamiento de cada iteración. Los miembros y ambos comités se compararon mediante predicciones \emph{out-of-fold} con validación cruzada estratificada de 5 particiones, y el conjunto de prueba se utilizó una sola vez, al final.
+
+% ======================================================================
+\section{Resultados y análisis}\label{sec:resultados}
+% ======================================================================
+
+\subsection{Comparación de los 49 experimentos}
+
+En la exploración con LazyPredict, el SVM lineal calibrado lideró cuatro de los seis conjuntos balanceados y Random Forest los otros dos, mientras que Naive Bayes y KNN quedaron entre los puestos 15 y 23 de 26. La Tabla~\ref{tab:f1} presenta el F1-macro en prueba de los 49 experimentos, que se ubica entre 0,624 y 0,740. El mejor resultado lo obtuvo la Regresión Logística sin balanceo (0,740), seguida por el SVM con SMOTE (0,730) y Gradient Boosting con SMOTE-ENN (0,728). Naive Bayes y KNN quedaron sistemáticamente por debajo del resto. Los modelos lineales (Regresión Logística y SVM, cuyo mejor kernel fue el lineal) encabezan la tabla, lo que sugiere que la frontera de decisión es aproximadamente lineal en el espacio de variables codificadas.
+
+\begin{table*}[!t]
+\caption{F1-macro en el conjunto de prueba según el modelo y la estrategia de balanceo (en negrita, el mejor valor de cada modelo)}
+\label{tab:f1}
+\centering
+\footnotesize
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+Modelo & Sin balanceo & SMOTE & ADASYN & Random Over & Random Under & SMOTE-Tomek & SMOTE-ENN \\
+\midrule
+Regresión Logística & \textbf{0,740} & 0,727 & 0,721 & 0,703 & 0,696 & 0,722 & 0,715 \\
+SVM & 0,727 & \textbf{0,730} & 0,721 & 0,680 & 0,690 & 0,727 & 0,716 \\
+Random Forest & 0,709 & 0,721 & 0,716 & \textbf{0,723} & 0,711 & 0,713 & 0,721 \\
+XGBoost & 0,718 & \textbf{0,719} & 0,704 & 0,699 & 0,708 & 0,715 & 0,716 \\
+Gradient Boosting & 0,715 & 0,691 & 0,696 & 0,693 & 0,704 & 0,685 & \textbf{0,728} \\
+KNN & \textbf{0,709} & 0,698 & 0,694 & 0,651 & 0,659 & 0,691 & 0,679 \\
+Naive Bayes & \textbf{0,697} & 0,678 & 0,670 & 0,624 & 0,625 & 0,680 & 0,686 \\
+\midrule
+Promedio & \textbf{0,717} & 0,709 & 0,703 & 0,682 & 0,685 & 0,705 & 0,709 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Efecto del balanceo de clases}
+
+En promedio sobre los siete modelos, el conjunto sin balancear obtuvo el mayor F1-macro (0,717), por encima de todas las estrategias de remuestreo (Tabla~\ref{tab:f1}). La Tabla~\ref{tab:delta} compara, para cada modelo, su resultado sin balanceo con su mejor estrategia de remuestreo. El balanceo elevó el \emph{recall} de la clase abandono en 13,8 puntos porcentuales en promedio, pero el F1-macro cambió apenas en $-0{,}001$: mejoró ligeramente en Random Forest, Gradient Boosting y SVM, y empeoró en Regresión Logística, KNN y Naive Bayes. Es decir, el balanceo desplaza a los clasificadores hacia una mayor detección de clientes que abandonan a costa de más falsas alarmas, sin producir un clasificador globalmente mejor.
+
+\begin{table}[!t]
+\caption{Efecto del balanceo: sin balanceo frente a la mejor estrategia de cada modelo}
+\label{tab:delta}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lcccl@{}}
+\toprule
+Modelo & F1 orig. & F1 bal. & $\Delta$F1 & Mejor estrategia \\
+\midrule
+Random Forest & 0,709 & 0,723 & $+$0,014 & Random Over \\
+Gradient Boosting & 0,715 & 0,728 & $+$0,013 & SMOTE-ENN \\
+SVM & 0,727 & 0,730 & $+$0,003 & SMOTE \\
+XGBoost & 0,718 & 0,719 & $+$0,001 & SMOTE \\
+KNN & 0,709 & 0,698 & $-$0,011 & SMOTE \\
+Naive Bayes & 0,697 & 0,686 & $-$0,011 & SMOTE-ENN \\
+Reg. Logística & 0,740 & 0,727 & $-$0,013 & SMOTE \\
+\midrule
+Promedio & & & $-$0,001 & ($\Delta$\emph{recall} $+$0,138) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La Fig.~\ref{fig:tradeoff} muestra esta tensión: los modelos entrenados sin balanceo (marcados con un aro) se ubican a la izquierda, con el menor \emph{recall} (entre 0,49 y 0,62), pero entre ellos está el mejor F1-macro. Naive Bayes alcanza el mayor \emph{recall} (hasta 0,88) con el F1-macro más bajo (0,62), debido al gran número de falsos positivos que genera.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=\columnwidth, height=6.2cm,
+  xlabel={\emph{Recall} de la clase abandono}, ylabel={F1-macro},
+  xmin=0.45, xmax=0.90, ymin=0.615, ymax=0.75,
+  xtick={0.5,0.6,0.7,0.8,0.9}, ytick={0.62,0.64,0.66,0.68,0.70,0.72,0.74},
+  /pgf/number format/use comma, /pgf/number format/fixed, /pgf/number format/fixed zerofill, /pgf/number format/precision=2,
+  tick label style={font=\scriptsize}, label style={font=\footnotesize},
+  grid=major, grid style={gray!20},
+  legend style={font=\tiny, at={(0.5,-0.24)}, anchor=north, legend columns=4, draw=none},
+  legend cell align=left]
+\addplot[only marks, mark=*, mark size=1.8pt, color=cLR] coordinates {(0.6631,0.7272) (0.6684,0.7207) (0.7968,0.7026) (0.7941,0.6959) (0.6578,0.7217) (0.7299,0.7147) (0.5749,0.7405)};
+\addlegendentry{Reg. Logística}
+\addplot[only marks, mark=diamond*, mark size=2.3pt, color=cSVM] coordinates {(0.6711,0.7297) (0.6390,0.7215) (0.5936,0.6802) (0.7968,0.6905) (0.6738,0.7274) (0.7246,0.7160) (0.5481,0.7270)};
+\addlegendentry{SVM}
+\addplot[only marks, mark=*, mark size=1.8pt, color=cRF] coordinates {(0.6310,0.7208) (0.6417,0.7159) (0.6016,0.7226) (0.8102,0.7111) (0.6257,0.7134) (0.7353,0.7213) (0.4866,0.7091)};
+\addlegendentry{Random Forest}
+\addplot[only marks, mark=*, mark size=1.8pt, color=cXGB] coordinates {(0.6337,0.7186) (0.5989,0.7036) (0.5882,0.6991) (0.8102,0.7079) (0.6230,0.7149) (0.7166,0.7163) (0.5214,0.7181)};
+\addlegendentry{XGBoost}
+\addplot[only marks, mark=*, mark size=1.8pt, color=cGB] coordinates {(0.5562,0.6912) (0.5856,0.6961) (0.5428,0.6932) (0.8209,0.7045) (0.5615,0.6852) (0.7326,0.7282) (0.5160,0.7149)};
+\addlegendentry{Gradient Boosting}
+\addplot[only marks, mark=diamond*, mark size=2.3pt, color=cKNN] coordinates {(0.7299,0.6980) (0.7326,0.6939) (0.6257,0.6514) (0.7861,0.6591) (0.6898,0.6908) (0.7861,0.6792) (0.5722,0.7093)};
+\addlegendentry{KNN}
+\addplot[only marks, mark=*, mark size=1.8pt, color=cNB] coordinates {(0.7941,0.6781) (0.8048,0.6704) (0.8717,0.6236) (0.8797,0.6248) (0.7914,0.6797) (0.7727,0.6859) (0.6230,0.6973)};
+\addlegendentry{Naive Bayes}
+\addplot[only marks, mark=o, mark size=3.6pt, color=cOrig, line width=0.9pt] coordinates {(0.5749,0.7405) (0.5481,0.7270) (0.4866,0.7091) (0.5214,0.7181) (0.5160,0.7149) (0.5722,0.7093) (0.6230,0.6973)};
+\addlegendentry{Sin balanceo}
+\end{axis}
+\end{tikzpicture}
+\caption{Compromiso entre \emph{recall} y F1-macro en prueba para los 49 experimentos. Los aros indican los modelos entrenados sin balanceo.}
+\label{fig:tradeoff}
+\end{figure}
+
+\subsection{Sobreestimación de la validación cruzada}
+
+Durante la búsqueda de hiperparámetros, los conjuntos remuestreados se generaron antes de la validación cruzada. Como consecuencia, las particiones de validación contenían ejemplos sintéticos derivados de las particiones de entrenamiento, lo que infló las métricas de validación~\cite{cawley2010overfitting}. El efecto fue más marcado con SMOTE-ENN, cuyo F1-macro en validación cruzada osciló entre 0,907 y 0,969, frente a valores entre 0,679 y 0,728 en prueba. Por esta razón, el comité de máquinas se evaluó con el balanceo aplicado dentro de cada partición.
+
+\subsection{Comité de máquinas}
+
+La Tabla~\ref{tab:comite} detalla los miembros del comité y los resultados de la validación cruzada \emph{out-of-fold}. El comité con voto mayoritario obtuvo el mayor F1-macro (0,737), seguido por la Regresión Logística sola (0,733) y el comité con voto suave (0,732). La Regresión Logística, en cambio, obtuvo el mayor AUC-ROC (0,846) y la mayor precisión (0,654). El AUC del voto mayoritario no se reporta porque este no produce probabilidades.
+
+\begin{table}[!t]
+\caption{Miembros del comité y validación cruzada \emph{out-of-fold} (5 particiones, umbral 0,5)}
+\label{tab:comite}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+Candidato & Balanceo & F1-m & Rec. & Prec. & AUC \\
+\midrule
+Comité \emph{hard} & -- & \textbf{0,737} & 0,644 & 0,596 & -- \\
+Reg. Logística & Ninguno & 0,733 & 0,547 & \textbf{0,654} & \textbf{0,846} \\
+Comité \emph{soft} & -- & 0,732 & 0,664 & 0,576 & 0,842 \\
+SVM (lineal) & SMOTE & 0,729 & 0,670 & 0,568 & 0,833 \\
+Random Forest & Random Over & 0,722 & 0,598 & 0,587 & 0,826 \\
+XGBoost & SMOTE & 0,718 & 0,611 & 0,572 & 0,825 \\
+Gradient Boosting & SMOTE-ENN & 0,716 & \textbf{0,702} & 0,534 & 0,821 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La ganancia del comité fue pequeña porque sus miembros no son suficientemente diversos. La correlación entre las probabilidades \emph{out-of-fold} de los miembros varió entre 0,80 y 0,96; la más alta se presentó entre la Regresión Logística y el SVM (0,955), ambos lineales, que tienden a equivocarse con los mismos clientes. Gradient Boosting fue el miembro más diferente, con correlaciones entre 0,80 y 0,82 frente a los demás.
+
+La Tabla~\ref{tab:test} compara los candidatos en el conjunto de prueba. El comité con voto mayoritario obtuvo el mayor F1-macro (0,744) y detectó 249 de los 374 clientes que abandonaron, con 165 falsas alarmas. Frente a la Regresión Logística, detectó 34 clientes más a cambio de 50 falsas alarmas adicionales; frente al SVM, detectó prácticamente los mismos clientes con 25 falsas alarmas menos. El comité con voto suave quedó por debajo de la Regresión Logística tanto en F1-macro como en AUC-ROC.
+
+\begin{table}[!t]
+\caption{Desempeño en el conjunto de prueba (1\,407 clientes, umbral 0,5)}
+\label{tab:test}
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Modelo & F1-m & Rec. & Prec. & AUC & VP\,/\,FP \\
+\midrule
+Comité \emph{hard} & \textbf{0,744} & 0,666 & 0,601 & -- & 249\,/\,165 \\
+Reg. Logística (sin bal.) & 0,740 & 0,575 & \textbf{0,652} & \textbf{0,837} & 215\,/\,115 \\
+Comité \emph{soft} & 0,731 & \textbf{0,687} & 0,565 & 0,836 & 257\,/\,198 \\
+SVM + SMOTE & 0,730 & 0,671 & 0,569 & 0,829 & 251\,/\,190 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Selección del modelo final}
+
+Se seleccionó la Regresión Logística sin balanceo ($C=1$, penalización L1) como modelo final. Su F1-macro está a 0,004 del comité tanto en validación cruzada como en prueba, una diferencia inferior a la variación esperable entre particiones, y es el mejor de los 49 experimentos individuales. Además, obtuvo el mayor AUC-ROC en validación cruzada (0,846) y la mayor precisión; entrega una probabilidad de abandono por cliente, útil para priorizar acciones y ajustar el umbral según el costo de cada error; sus coeficientes, depurados por la penalización L1, explican los factores de abandono a usuarios no técnicos; y, al ser un único modelo sin remuestreo, simplifica el despliegue y el reentrenamiento.
+
+En prueba clasificó correctamente 918 de 1\,033 clientes que permanecieron y 215 de 374 que abandonaron (exactitud de 0,805). Su principal limitación es el \emph{recall} de 0,575 con el umbral por defecto, que puede elevarse reduciendo el umbral a partir de las probabilidades \emph{out-of-fold}, sin remuestrear los datos.
+
+% ======================================================================
+\section{Plataforma de predicción}\label{sec:plataforma}
+% ======================================================================
+
+Para que las predicciones sean útiles a los equipos comerciales, el modelo se integró en una plataforma web compuesta por cuatro servicios en contenedores Docker (Fig.~\ref{fig:arq}): una base de datos PostgreSQL con los clientes, sus predicciones y el historial de modelos; un servidor MLflow que actúa como registro de modelos; una API REST desarrollada con FastAPI; y un \emph{dashboard} en Streamlit.
+
+\begin{figure}[!t]
+\centering
+\begin{tikzpicture}[
+  node distance=0.45cm and 0.5cm,
+  box/.style={draw, rounded corners=2pt, fill=gray!8, align=center, font=\scriptsize, minimum height=0.85cm, minimum width=1.9cm},
+  arr/.style={-{Stealth[length=4pt]}, thin}]
+\node[box] (dash) {Dashboard\\(Streamlit)};
+\node[box, right=of dash] (api) {API REST\\(FastAPI)};
+\node[box, right=of api] (db) {PostgreSQL\\clientes y predicciones};
+\node[box, below=of api] (mlf) {MLflow\\registro de modelos};
+\node[box, right=of mlf] (ret) {Reentrenamiento\\mensual};
+\draw[arr] (dash) -- node[above, font=\tiny]{HTTP} (api);
+\draw[arr, <->] (api) -- (db);
+\draw[arr] (mlf) -- node[left, font=\tiny, align=right]{alias\\\texttt{production}} (api);
+\draw[arr] (ret) -- (mlf);
+\draw[arr] (ret) -- (db);
+\end{tikzpicture}
+\caption{Arquitectura de la plataforma.}
+\label{fig:arq}
+\end{figure}
+
+\textbf{Servicio del modelo.} La plataforma sirve la Regresión Logística seleccionada en la sección anterior. La API carga el modelo desde el registro de MLflow mediante el alias \texttt{production} y lo mantiene en memoria; cada 30~segundos verifica si el alias apunta a una nueva versión y, en ese caso, la recarga sin reiniciar el servicio. Así, cambiar el modelo en producción consiste en reasignar el alias, sin modificar el código. El preprocesamiento replica exactamente la codificación \emph{one-hot} del entrenamiento para producir las mismas 30 variables. La API ofrece predicción individual por cliente, predicción sobre datos ingresados manualmente (sin guardarlos) y predicción por lotes de toda la base, que se ejecuta en segundo plano en bloques de 500 clientes.
+
+\textbf{Explicabilidad.} Cada predicción incluye los valores SHAP~\cite{lundberg2017shap} de las 30 variables, calculados con el explicador adecuado al tipo de modelo (de árboles, lineal o por permutación); si ninguno es aplicable, la predicción se entrega igualmente sin explicación. Para el usuario, las contribuciones de las columnas \emph{one-hot} se suman por variable original y se presentan como los factores que aumentan o reducen el riesgo de cada cliente.
+
+\textbf{Reentrenamiento.} Un planificador interno repite cada mes el protocolo de este estudio sobre los datos originales: Regresión Logística sin balanceo, Random Forest con sobremuestreo aleatorio, XGBoost con SMOTE y Gradient Boosting con SMOTE-ENN, con el remuestreo dentro de cada partición. El candidato con mayor F1-macro en validación cruzada de 5 particiones se promueve al alias \texttt{production} solo si supera en al menos 0,01 al modelo activo, reevaluado sobre las mismas particiones; el conjunto de prueba solo se usa para reportar sus métricas.
+
+\textbf{Dashboard para usuarios no técnicos.} La interfaz evita la terminología técnica y se organiza en cinco vistas. \emph{Resumen} muestra cuántos clientes están en riesgo, el ingreso mensual en riesgo, un párrafo que resume la situación en lenguaje claro, la distribución por nivel de riesgo y los segmentos más afectados. \emph{A quién llamar} ordena a los clientes en riesgo por el ingreso esperado que se perdería, $p(\mathbf{x})\times$ cargo mensual, e indica para cada uno la principal razón de su riesgo. \emph{Consultar cliente} muestra la probabilidad, el nivel de riesgo (bajo, por debajo del 30\,\%; medio, entre 30 y 60\,\%; alto, desde 60\,\%), una acción recomendada y sus factores principales; además, simula acciones de retención (por ejemplo, ofrecer un contrato anual, incluir soporte técnico, migrar a pago automático o aplicar un descuento) y muestra cómo cambiaría su probabilidad. Las vistas \emph{Clientes} y \emph{Mantenimiento} permiten consultar la base, lanzar el análisis por lotes y el reentrenamiento, y ver la calidad del modelo expresada como el porcentaje de abandonos que detecta y el de aciertos cuando emite una alerta.
+
+Las simulaciones de retención reflejan asociaciones aprendidas por el modelo y no efectos causales: indican qué perfiles presentan menor riesgo, no garantizan que el cambio propuesto retenga al cliente.
+
+% ======================================================================
+\section{Conclusiones}\label{sec:conclusiones}
+% ======================================================================
+
+Este trabajo comparó siete clasificadores y siete conjuntos de entrenamiento para predecir el abandono de clientes en IBM Telco. El balanceo de clases no mejoró el F1-macro ($-0{,}001$ en promedio) aunque aumentó el \emph{recall} en 13,8 puntos porcentuales, y los datos sin balancear obtuvieron el mejor F1-macro promedio. Los modelos lineales encabezaron los resultados, lo que sugiere una frontera aproximadamente lineal. El comité de voto mayoritario logró el mayor F1-macro (0,744), pero solo 0,004 por encima de la Regresión Logística, debido a la alta correlación entre sus miembros; por ello se seleccionó la Regresión Logística sin balanceo, por su desempeño equivalente, su mayor AUC-ROC, su interpretabilidad y su simplicidad. Además, se constató que remuestrear antes de la validación cruzada sobreestima el desempeño.
+
+El modelo se integró en una plataforma que entrega predicciones explicadas, prioriza a qué clientes contactar y permite simular acciones de retención sin conocimientos técnicos, y cuyo reentrenamiento mensual sigue el mismo protocolo sin fuga de información. Como trabajo futuro se propone elegir el umbral según el costo de cada tipo de error con predicciones \emph{out-of-fold}, repetir el estudio con varias semillas y evaluar con usuarios reales la utilidad del \emph{dashboard}.
+
+\section*{Agradecimientos}
+
+Los autores declaran el uso de Claude (Anthropic) como asistente de inteligencia artificial en este trabajo. Se utilizó para revisar y depurar el código de entrenamiento de los modelos, implementar el comité de máquinas, calcular las estadísticas del análisis exploratorio, apoyar el desarrollo del \emph{dashboard}, apoyar la interpretación de los resultados y redactar un borrador de todas las secciones del artículo, así como para el formato en \LaTeX{}, las tablas y las figuras. Los experimentos fueron diseñados y ejecutados por los autores, quienes revisaron, verificaron y editaron todo el contenido generado, y asumen plena responsabilidad por la exactitud y la integridad del artículo.
+
+% ======================================================================
+\begin{thebibliography}{99}
+% ======================================================================
+% NOTA: en las referencias del anteproyecto no figuraban los autores.
+% Completar los nombres de los autores antes de entregar.
+
+\bibitem{lalwani2020review}
+% TODO: completar autores
+``Telecom churn prediction and used techniques, datasets and performance measures: a review,'' \emph{Telecommunication Systems}, Springer, 2020, doi: 10.1007/s11235-020-00727-0.
+
+\bibitem{survey2024decade}
+% TODO: completar autores
+``A decade of churn prediction techniques in the TelCo domain: A survey,'' \emph{SN Computer Science}, 2024.
+
+\bibitem{review2026systematic}
+% TODO: completar autores
+``Telecom customer churn prediction: a detailed systematic review,'' \emph{Telecommunication Systems}, Springer, 2026, doi: 10.1007/s11235-026-01491-3.
+
+\bibitem{chawla2002smote}
+N.~V. Chawla, K.~W. Bowyer, L.~O. Hall y W.~P. Kegelmeyer, ``SMOTE: Synthetic minority over-sampling technique,'' \emph{J. Artif. Intell. Res.}, vol.~16, pp.~321--357, 2002.
+
+\bibitem{ibmtelco}
+IBM, ``Telco Customer Churn,'' IBM Sample Data Sets, publicado en Kaggle por blastchar, 2018. [En línea]. Disponible: \url{https://www.kaggle.com/datasets/blastchar/telco-customer-churn}
+
+\bibitem{hindawi2022detecting}
+% TODO: completar autores
+``Detecting the risk of customer churn in telecom sector: A comparative study,'' \emph{Computational Intelligence and Neuroscience}, Hindawi, 2022.
+
+\bibitem{plos2023retention}
+% TODO: completar autores
+``Customer retention and churn prediction in the telecommunication industry,'' \emph{PLOS ONE}, 2023.
+
+\bibitem{plos2025predictive}
+% TODO: completar autores
+``A predictive analytics approach to improve telecom's customer retention,'' \emph{PLOS ONE}, 2025. [En línea]. Disponible: \url{https://pmc.ncbi.nlm.nih.gov/articles/PMC12426120/}
+
+\bibitem{imitec2024ml}
+% TODO: completar autores
+``A machine learning approach for customer churn prediction,'' en \emph{Proc. IEEE IMITEC}, 2024. [En línea]. Disponible: \url{https://ieeexplore.ieee.org/document/10851064/}
+
+\bibitem{breiman2001rf}
+L.~Breiman, ``Random forests,'' \emph{Mach. Learn.}, vol.~45, no.~1, pp.~5--32, 2001.
+
+\bibitem{friedman2001gbm}
+J.~H. Friedman, ``Greedy function approximation: A gradient boosting machine,'' \emph{Ann. Statist.}, vol.~29, no.~5, pp.~1189--1232, 2001.
+
+\bibitem{chen2016xgboost}
+T.~Chen y C.~Guestrin, ``XGBoost: A scalable tree boosting system,'' en \emph{Proc. 22nd ACM SIGKDD Int. Conf. Knowledge Discovery and Data Mining}, 2016, pp.~785--794.
+
+\bibitem{acisc2026softvoting}
+% TODO: completar autores
+``Enhancing telecom customer churn prediction through hyperparameter tuning and soft-voting ensemble modeling,'' \emph{Applied Computational Intelligence and Soft Computing}, 2026, doi: 10.1155/acis/7620084.
+
+\bibitem{jcs2026developing}
+% TODO: completar autores
+``Developing an effective churn prediction model for telecommunications,'' \emph{Journal of Computer Science}, 2026. [En línea]. Disponible: \url{https://thescipub.com/pdf/jcssp.2026.75.86.pdf}
+
+\bibitem{arxiv2024adaptive}
+% TODO: completar autores
+``Enhancing customer churn prediction in telecommunications: An adaptive ensemble learning approach,'' arXiv:2408.16284, 2024.
+
+\bibitem{dietterich2000ensemble}
+T.~G. Dietterich, ``Ensemble methods in machine learning,'' en \emph{Multiple Classifier Systems}, ser. LNCS, vol.~1857. Berlin, Germany: Springer, 2000, pp.~1--15.
+
+\bibitem{kuncheva2014combining}
+L.~I. Kuncheva, \emph{Combining Pattern Classifiers: Methods and Algorithms}, 2nd~ed. Hoboken, NJ, USA: Wiley, 2014.
+
+\bibitem{plos2026xai}
+% TODO: completar autores
+``Explainable AI-driven customer churn prediction: a multi-model framework,'' \emph{PLOS ONE}, 2026. [En línea]. Disponible: \url{https://pmc.ncbi.nlm.nih.gov/articles/PMC12929532/}
+
+\bibitem{lundberg2017shap}
+S.~M. Lundberg y S.-I. Lee, ``A unified approach to interpreting model predictions,'' en \emph{Advances in Neural Information Processing Systems 30}, 2017, pp.~4765--4774.
+
+\bibitem{cogent2026endtoend}
+% TODO: completar autores
+``An end-to-end machine learning framework for customer churn prediction,'' Taylor \& Francis, 2026, doi: 10.1080/29966892.2026.2701487.
+
+\bibitem{icatam2024survival}
+% TODO: completar autores
+``IBM Telco customer churn prediction with survival analysis,'' en \emph{Proc. ICATAM 2024}, Atlantis Press, 2024.
+
+\bibitem{arxiv2026marketing}
+% TODO: completar autores
+``Data-driven telecom marketing optimization: A machine learning approach,'' arXiv:2607.10260, 2026.
+
+\bibitem{he2008adasyn}
+H.~He, Y.~Bai, E.~A. Garcia y S.~Li, ``ADASYN: Adaptive synthetic sampling approach for imbalanced learning,'' en \emph{Proc. IEEE Int. Joint Conf. Neural Networks (IJCNN)}, 2008, pp.~1322--1328.
+
+\bibitem{batista2004balancing}
+G.~E. A. P.~A. Batista, R.~C. Prati y M.~C. Monard, ``A study of the behavior of several methods for balancing machine learning training data,'' \emph{SIGKDD Explor. Newsl.}, vol.~6, no.~1, pp.~20--29, 2004.
+
+\bibitem{cawley2010overfitting}
+G.~C. Cawley y N.~L.~C. Talbot, ``On over-fitting in model selection and subsequent selection bias in performance evaluation,'' \emph{J. Mach. Learn. Res.}, vol.~11, pp.~2079--2107, 2010.
+
+\bibitem{shearer2000crisp}
+C.~Shearer, ``The CRISP-DM model: The new blueprint for data mining,'' \emph{J. Data Warehousing}, vol.~5, no.~4, pp.~13--22, 2000.
+
+\bibitem{pedregosa2011sklearn}
+F.~Pedregosa \emph{et al.}, ``Scikit-learn: Machine learning in Python,'' \emph{J. Mach. Learn. Res.}, vol.~12, pp.~2825--2830, 2011.
+
+\bibitem{lemaitre2017imblearn}
+G.~Lemaître, F.~Nogueira y C.~K. Aridas, ``Imbalanced-learn: A Python toolbox to tackle the curse of imbalanced datasets in machine learning,'' \emph{J. Mach. Learn. Res.}, vol.~18, no.~17, pp.~1--5, 2017.
+
+\bibitem{zaharia2018mlflow}
+M.~Zaharia \emph{et al.}, ``Accelerating the machine learning lifecycle with MLflow,'' \emph{IEEE Data Eng. Bull.}, vol.~41, no.~4, pp.~39--45, 2018.
+
+\bibitem{cramer1946mathematical}
+H.~Cramér, \emph{Mathematical Methods of Statistics}. Princeton, NJ, USA: Princeton University Press, 1946.
+
+\bibitem{bergsma2013bias}
+W.~Bergsma, ``A bias-correction for Cramér's V and Tschuprow's T,'' \emph{J. Korean Stat. Soc.}, vol.~42, no.~3, pp.~323--328, 2013.
+
+\bibitem{tibshirani1996lasso}
+R.~Tibshirani, ``Regression shrinkage and selection via the lasso,'' \emph{J. R. Stat. Soc. Ser. B}, vol.~58, no.~1, pp.~267--288, 1996.
+
+\bibitem{cortes1995svm}
+C.~Cortes y V.~Vapnik, ``Support-vector networks,'' \emph{Mach. Learn.}, vol.~20, no.~3, pp.~273--297, 1995.
+
+\bibitem{cover1967knn}
+T.~Cover y P.~Hart, ``Nearest neighbor pattern classification,'' \emph{IEEE Trans. Inf. Theory}, vol.~13, no.~1, pp.~21--27, 1967.
+
+\bibitem{platt1999probabilistic}
+J.~Platt, ``Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods,'' en \emph{Advances in Large Margin Classifiers}. Cambridge, MA, USA: MIT Press, 1999, pp.~61--74.
+
+\bibitem{lazypredict}
+S.~R. Pandala, ``Lazy Predict,'' repositorio de software. [En línea]. Disponible: \url{https://github.com/shankarpandala/lazypredict}
+
+\end{thebibliography}
+
+\end{document}

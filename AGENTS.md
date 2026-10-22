@@ -20,6 +20,6 @@
   3. `ml_pipeline/data/resampled/smote_enn/{X_train,y_train}.csv` + `original/{X_test,y_test}.csv` — notebook outputs; `run_retrain()` fails without them. MLflow logging failure is caught and non-fatal; missing CSVs are not.
 - Preprocessor contract (`backend/app/utils/preprocessor.py`): replicates `pd.get_dummies(drop_first=True)` from `data_preprocessing.ipynb` → exactly 30 features in `EXPECTED_FEATURE_NAMES`. Keep in sync with the notebook; never re-derive encoding independently.
 - Case mismatch is intentional: DB/schemas use `snake_case` (`senior_citizen`), preprocessor expects notebook `CapitalCase` keys (`SeniorCitizen`, `MonthlyCharges`, …). Follow the mapping in `batch_predictor.py` when adding callers.
-- Threshold default is `0.30`, not `0.5` (`MODEL_THRESHOLD`, `DEFAULT_MODEL=GradientBoosting`). Retrain only promotes when F1 exceeds active model by `RETRAIN_MIN_IMPROVEMENT` (default `0.01`).
+- Threshold default is `0.30`, not `0.5` (`MODEL_THRESHOLD`, `DEFAULT_MODEL=LogisticRegression`). Retrain only promotes when F1 exceeds active model by `RETRAIN_MIN_IMPROVEMENT` (default `0.01`).
 - Scheduler is in-process APScheduler (`app/utils/scheduler.py`, cron day=1 02:00), disabled when `ENVIRONMENT=test` or `ENABLE_SCHEDULER=false`. Manual run: `POST /api/v1/retrain/trigger`.
 - `dashboard/app.py` reads `API_URL` from env (default `http://api:8000` for Docker); local/Streamlit Cloud must set it. Timeouts: GET 60s, predict 90s, batch 180s, retrain 90s.

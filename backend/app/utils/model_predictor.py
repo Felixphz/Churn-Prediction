@@ -19,9 +19,12 @@ mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
 
 def _build_explainer(model):
     """Return a SHAP explainer matched to the model type, or None if unsupported."""
-    background = pd.DataFrame(
-        [np.zeros(len(EXPECTED_FEATURE_NAMES))], columns=EXPECTED_FEATURE_NAMES
-    )
+    # Training mean saved with the model (scripts/retrain.py); zeros for older models
+    background = getattr(model, "shap_background_", None)
+    if background is None:
+        background = pd.DataFrame(
+            [np.zeros(len(EXPECTED_FEATURE_NAMES))], columns=EXPECTED_FEATURE_NAMES
+        )
 
     # Tree models: exact, no background needed (path-dependent baseline)
     try:

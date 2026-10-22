@@ -1,10 +1,13 @@
 from datetime import datetime
 from sqlalchemy.orm import Session
+from app.config import get_settings
 from app.models.customer import Customer
 from app.models.prediction import Prediction
 from app.models.model_registry import ModelRegistry
 from app.utils.model_predictor import predict_customer as _predict_customer
 from app.utils.preprocessor import preprocess_customer
+
+settings = get_settings()
 
 
 def get_active_model(db: Session) -> ModelRegistry:
@@ -44,7 +47,7 @@ def predict_on_demand(db: Session, customer_id: str, threshold: float = 0.3) -> 
 
     # Get active model info
     active_model = get_active_model(db)
-    model_name = active_model.model_name if active_model else "GradientBoosting"
+    model_name = active_model.model_name if active_model else settings.DEFAULT_MODEL
     model_version = active_model.model_version if active_model else None
 
     # Save prediction
@@ -143,7 +146,7 @@ def predict_from_data(db: Session, data: dict, threshold: float = 0.3) -> dict:
             "churn_probability": result["churn_probability"],
             "churn_predicted": result["churn_predicted"],
             "threshold": threshold,
-            "model": active_model.model_name if active_model else "GradientBoosting",
+            "model": active_model.model_name if active_model else settings.DEFAULT_MODEL,
             "model_version": active_model.model_version if active_model else None,
         },
         "explainability": {

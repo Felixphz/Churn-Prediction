@@ -2,12 +2,15 @@ import threading
 import uuid
 from datetime import datetime
 
+from app.config import get_settings
 from app.database import SessionLocal
 from app.models.customer import Customer
 from app.models.prediction import Prediction
 from app.models.model_registry import ModelRegistry
 from app.utils.model_predictor import predict_frame
 from app.utils.preprocessor import preprocess_customers
+
+settings = get_settings()
 
 CHUNK_SIZE = 500
 
@@ -55,7 +58,7 @@ def run_batch_predictions(batch_run_id: str, threshold: float = 0.3) -> dict:
         _update(batch_run_id, total_customers=total)
 
         active_model = db.query(ModelRegistry).filter(ModelRegistry.is_active == True).first()
-        model_name = active_model.model_name if active_model else "GradientBoosting"
+        model_name = active_model.model_name if active_model else settings.DEFAULT_MODEL
         model_version = active_model.model_version if active_model else None
 
         processed = churn_count = errors = 0
