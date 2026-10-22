@@ -100,11 +100,12 @@ def with_background(model, X_train: pd.DataFrame):
 def test_metrics(model, X_test, y_test) -> dict:
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
+    # Plain floats: numpy scalars can't be bound as SQL parameters
     return {
-        "f1_macro": f1_score(y_test, y_pred, average="macro"),
-        "recall": recall_score(y_test, y_pred),
-        "precision": precision_score(y_test, y_pred),
-        "auc_roc": roc_auc_score(y_test, y_proba),
+        "f1_macro": float(f1_score(y_test, y_pred, average="macro")),
+        "recall": float(recall_score(y_test, y_pred)),
+        "precision": float(precision_score(y_test, y_pred)),
+        "auc_roc": float(roc_auc_score(y_test, y_proba)),
     }
 
 
