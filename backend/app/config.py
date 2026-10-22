@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg2://user:password@localhost:5432/churn_prediction"
     DB_USER: str = "user"
     DB_PASSWORD: str = "password"
+    # Labeled outcomes used only for retraining (separate database)
+    TRAINING_DATABASE_URL: str = "postgresql+psycopg2://user:password@localhost:5432/churn_training"
 
     # MLflow
     MLFLOW_TRACKING_URI: str = "http://localhost:5000"
@@ -25,6 +27,16 @@ class Settings(BaseSettings):
 
     # Retrain
     RETRAIN_MIN_IMPROVEMENT: float = 0.01
+    TOP_K_MODELS: int = 5  # MLflow runs kept after each retrain (plus production)
+    RETRAIN_SERVICE_URL: str = "http://localhost:8001"
+    RETRAIN_INCLUDE_TREATED: bool = False  # train on customers that got a retention action
+    RETRAIN_MIN_SAMPLES: int = 500
+    RETRAIN_STALE_HOURS: int = 3  # a "running" retrain older than this no longer blocks triggers
+
+    # GitHub Actions retrain (production); empty -> proxy to RETRAIN_SERVICE_URL
+    GITHUB_TOKEN: str = ""
+    GITHUB_REPO: str = ""
+    RETRAIN_WORKFLOW: str = "monthly-retrain.yml"
 
     # Startup flags
     SEED_ON_STARTUP: bool = True

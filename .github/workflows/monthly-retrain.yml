@@ -1,0 +1,40 @@
+name: Monthly retrain
+
+on:
+  schedule:
+    - cron: "0 2 1 * *"  # day 1 at 02:00 UTC
+  workflow_dispatch:  # manual run, also used by POST /api/v1/retrain/trigger
+
+# Queue instead of cancelling a retrain that is already running
+concurrency:
+  group: retrain
+  cancel-in-progress: false
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # pinned deps (scikit-learn==1.6.1) need 3.11, as in the Dockerfile
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - name: Retrain
+        run: python scripts/retrain.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}  # operational DB: retrain_history, model_registry
+          TRAINING_DATABASE_URL: ${{ secrets.TRAINING_DATABASE_URL }}  # labeled outcomes
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+          ENVIRONMENT: production
+          TOP_K_MODELS: "5"

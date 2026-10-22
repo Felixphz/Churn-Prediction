@@ -1,5 +1,9 @@
+from datetime import datetime, timedelta
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from app.config import get_settings
 from app.database import get_db
 from app.schemas.pipeline import (
     BatchPredictResponse,
@@ -12,7 +16,41 @@ from app.models.customer import Customer
 from app.models.prediction import Prediction
 from app.models.retrain_history import RetrainHistory
 
+settings = get_settings()
 router = APIRouter(prefix="/api/v1", tags=["pipeline"])
+
+
+def _dispatch_github_workflow():
+    """Production: run the retrain workflow on GitHub Actions (workflow_dispatch)."""
+    url = (
+        f"https://api.github.com/repos/{settings.GITHUB_REPO}"
+        f"/actions/workflows/{settings.RETRAIN_WORKFLOW}/dispatches"
+    )
+    try:
+        res = httpx.post(
+            url,
+            json={"ref": "main"},
+            headers={
+                "Authorization": f"Bearer {settings.GITHUB_TOKEN}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=30,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=503, detail=f"GitHub API unavailable: {e}")
+    if res.status_code != 204:
+        raise HTTPException(status_code=502, detail=f"GitHub workflow dispatch failed: {res.text}")
+
+
+def _trigger_retrainer_service():
+    """Local (docker-compose): forward to the retrainer service, passing its errors through."""
+    try:
+        res = httpx.post(f"{settings.RETRAIN_SERVICE_URL}/trigger", timeout=30)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=503, detail=f"Retrainer service unavailable: {e}")
+    if res.status_code >= 400:
+        raise HTTPException(status_code=res.status_code, detail=res.json().get("detail", res.text))
 
 
 @router.post("/predictions/batch", response_model=BatchPredictResponse, status_code=202)
@@ -37,7 +75,7 @@ def batch_status(batch_run_id: str, db: Session = Depends(get_db)):
     )
     if not processed:
         raise HTTPException(status_code=404, detail="Batch run not found")
-    total = db.query(func.count(Customer.id)).scalar() or 0
+    total = db.query(func.count(Customer.id)).filter(Customer.active == True).scalar() or 0
     return {
         "batch_run_id": batch_run_id,
         "status": "completed" if processed >= total else "incomplete",
@@ -76,10 +114,26 @@ def retrain_history(
 
 
 @router.post("/retrain/trigger")
-def trigger_retrain():
-    from app.utils.scheduler import scheduled_retrain
-    import threading
+def trigger_retrain(db: Session = Depends(get_db)):
+    latest = db.query(RetrainHistory).order_by(RetrainHistory.started_at.desc()).first()
+    stale_after = timedelta(hours=settings.RETRAIN_STALE_HOURS)
+    if latest and latest.status == "running" and datetime.utcnow() - latest.started_at < stale_after:
+        raise HTTPException(status_code=409, detail="A retrain is already running")
 
-    thread = threading.Thread(target=scheduled_retrain, daemon=True)
-    thread.start()
+    if settings.GITHUB_TOKEN and settings.GITHUB_REPO:
+        _dispatch_github_workflow()
+    else:
+        _trigger_retrainer_service()
     return {"message": "Retrain triggered in background"}
+
+
+@router.get("/retrain/top-models")
+def retrain_top_models(limit: int | None = None):
+    """Best MLflow runs by CV F1-macro, kept for analysis after each retrain."""
+    from scripts.retrain import top_models
+
+    try:
+        models = top_models(limit)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"MLflow unavailable: {e}")
+    return {"models": models, "total": len(models)}

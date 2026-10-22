@@ -6,6 +6,11 @@
 - The active model is re-scored on the same folds, so the promotion gate is a
   like-for-like comparison.
 - The test split is used only to report metrics of the model that is kept.
+- Data comes from the training DB (confirmed outcomes only, never predictions);
+  customers that received a retention action are excluded unless
+  RETRAIN_INCLUDE_TREATED, since their outcome is confounded by the intervention.
+- Every candidate is logged to MLflow with its model; afterwards only the
+  TOP_K_MODELS best runs by CV F1-macro (plus the production one) are kept.
 """
 from __future__ import annotations
 
@@ -14,7 +19,6 @@ import sys
 import uuid
 from datetime import datetime
 
-import joblib
 import mlflow
 import mlflow.sklearn
 import pandas as pd
@@ -26,7 +30,7 @@ from sklearn.base import clone
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score
-from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_val_score, train_test_split
 
 # Add parent to path for app imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,16 +38,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.database import SessionLocal
 from app.models.model_registry import ModelRegistry
 from app.models.retrain_history import RetrainHistory
+from app.models.training_sample import TrainingSample
+from app.training_database import TrainingSessionLocal
+from app.utils.preprocessor import customer_to_record, preprocess_customers
 from app.config import get_settings
 
 settings = get_settings()
 
-DATA_DIR = os.path.join(
-    os.path.dirname(__file__), "..", "..", "ml_pipeline", "data", "resampled", "original"
-)
-RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "ml_pipeline", "data", "results")
 CV_FOLDS = 5
 SEED = 42
+EXPERIMENT_NAME = "churn_prediction"
 
 # Final model selected in the study: Logistic Regression, no resampling, C=1, L1.
 FINAL_MODEL_NAME = "LogisticRegression"
@@ -80,11 +84,24 @@ CANDIDATES = {
 
 
 def load_data():
-    X_train = pd.read_csv(os.path.join(DATA_DIR, "X_train.csv"))
-    y_train = pd.read_csv(os.path.join(DATA_DIR, "y_train.csv"))["Churn"]
-    X_test = pd.read_csv(os.path.join(DATA_DIR, "X_test.csv"))
-    y_test = pd.read_csv(os.path.join(DATA_DIR, "y_test.csv"))["Churn"]
-    return X_train, y_train, X_test, y_test
+    """Labeled samples from the training DB, split like data_preprocessing.ipynb."""
+    db = TrainingSessionLocal()
+    try:
+        query = db.query(TrainingSample)
+        if not settings.RETRAIN_INCLUDE_TREATED:
+            query = query.filter(TrainingSample.retention_action == False)
+        samples = query.order_by(TrainingSample.id).all()
+    finally:
+        db.close()
+    if len(samples) < settings.RETRAIN_MIN_SAMPLES:
+        raise ValueError(
+            f"Only {len(samples)} labeled samples in the training DB "
+            f"(RETRAIN_MIN_SAMPLES={settings.RETRAIN_MIN_SAMPLES})"
+        )
+
+    X = preprocess_customers([customer_to_record(s) for s in samples])
+    y = pd.Series([int(s.churn) for s in samples], name="Churn")
+    return train_test_split(X, y, test_size=0.2, random_state=SEED, stratify=y)
 
 
 def cv_splitter():
@@ -109,22 +126,79 @@ def test_metrics(model, X_test, y_test) -> dict:
     }
 
 
-def register_in_mlflow(model, name: str, params: dict, metrics: dict, run_name: str):
-    """Log + register the model and point the production alias to it. Returns the run id."""
+def log_model_run(model, params: dict, metrics: dict, run_name: str, tags: dict | None = None) -> str:
+    """Log params, metrics and the serving model as one MLflow run. Returns the run id."""
     mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
-    mlflow.set_experiment("churn_prediction")
-    with mlflow.start_run(run_name=run_name) as run:
+    mlflow.set_experiment(EXPERIMENT_NAME)
+    with mlflow.start_run(run_name=run_name, tags=tags) as run:
         mlflow.log_params(params)
         mlflow.log_metrics(metrics)
         mlflow.sklearn.log_model(model, name="model", serialization_format="cloudpickle")
-        run_id = run.info.run_id
+        return run.info.run_id
 
+
+def register_in_mlflow(run_id: str):
+    """Register the run's model and point the production alias to it."""
+    mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
     version = mlflow.register_model(f"runs:/{run_id}/model", settings.REGISTRY_MODEL_NAME)
     mlflow.MlflowClient().set_registered_model_alias(
         settings.REGISTRY_MODEL_NAME, settings.MODEL_ALIAS, version.version
     )
     print(f"MLflow Registry: {settings.REGISTRY_MODEL_NAME} v{version.version} -> @{settings.MODEL_ALIAS}")
-    return run_id
+
+
+def production_run_id(client) -> str | None:
+    try:
+        return client.get_model_version_by_alias(settings.REGISTRY_MODEL_NAME, settings.MODEL_ALIAS).run_id
+    except Exception:
+        return None
+
+
+def ranked_runs(client):
+    """Finished runs of the experiment that carry a CV F1-macro, best first."""
+    experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
+    if experiment is None:
+        return []
+    return client.search_runs(
+        [experiment.experiment_id],
+        filter_string="attributes.status = 'FINISHED' and metrics.cv_f1_macro > 0",
+        order_by=["metrics.cv_f1_macro DESC"],
+        max_results=1000,
+    )
+
+
+def top_models(keep: int | None = None) -> list[dict]:
+    """The best `keep` runs by CV F1-macro, as plain dicts for the API."""
+    mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
+    client = mlflow.MlflowClient()
+    prod = production_run_id(client)
+    return [
+        {
+            "run_id": r.info.run_id,
+            "run_name": r.info.run_name,
+            "model_name": r.data.tags.get("model_name"),
+            "sampler": r.data.tags.get("sampler"),
+            "params": r.data.params,
+            "metrics": r.data.metrics,
+            "is_production": r.info.run_id == prod,
+            "started_at": datetime.utcfromtimestamp(r.info.start_time / 1000),
+        }
+        for r in ranked_runs(client)[: keep or settings.TOP_K_MODELS]
+    ]
+
+
+def prune_runs(keep: int | None = None) -> int:
+    """Delete every ranked run outside the top `keep`, except the production one."""
+    mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
+    client = mlflow.MlflowClient()
+    prod = production_run_id(client)
+    deleted = 0
+    for r in ranked_runs(client)[keep or settings.TOP_K_MODELS:]:
+        if r.info.run_id != prod:
+            client.delete_run(r.info.run_id)
+            deleted += 1
+    print(f"MLflow: pruned {deleted} runs, kept top {keep or settings.TOP_K_MODELS} (+ production)")
+    return deleted
 
 
 def activate_in_db(db, name: str, version: str, params: dict, metrics: dict, resampling: str | None):
@@ -160,12 +234,10 @@ def run_retrain():
     db.commit()
 
     try:
-        X_train, y_train, X_test, y_test = load_data()
+        X_train, X_test, y_train, y_test = load_data()
         history.total_customers = len(X_train) + len(X_test)
         history.train_samples = len(X_train)
         history.test_samples = len(X_test)
-
-        mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
 
         # 1. Select the best candidate by cross-validated F1-macro
         best = None
@@ -181,10 +253,23 @@ def run_retrain():
             search.fit(X_train, y_train)
             print(f"  {name}: CV F1-macro={search.best_score_:.4f} {search.best_params_}")
 
+            # Serve the bare classifier: samplers only act at fit time, and SHAP's
+            # tree/linear explainers need the estimator itself, not the pipeline.
+            fitted = search.best_estimator_
+            fitted = fitted.named_steps["clf"] if isinstance(fitted, Pipeline) else fitted
+            fitted = with_background(fitted, X_train)
+            metrics = test_metrics(fitted, X_test, y_test)
+            params = {k.removeprefix("clf__"): v for k, v in search.best_params_.items()}
+            sampler_name = type(sampler).__name__ if sampler else None
+
+            mlflow_run_id = None
             try:
-                with mlflow.start_run(run_name=f"retrain_{name}_{run_id}"):
-                    mlflow.log_params(search.best_params_)
-                    mlflow.log_metric("cv_f1_macro", search.best_score_)
+                mlflow_run_id = log_model_run(
+                    fitted, params,
+                    {"cv_f1_macro": float(search.best_score_), **{f"test_{k}": v for k, v in metrics.items()}},
+                    run_name=f"retrain_{name}_{run_id}",
+                    tags={"model_name": name, "sampler": sampler_name or "none", "retrain_run_id": run_id},
+                )
             except Exception as e:
                 print(f"  MLflow logging failed: {e}")
 
@@ -192,20 +277,16 @@ def run_retrain():
                 best = {
                     "name": name,
                     "cv_f1": float(search.best_score_),
-                    "params": {k.removeprefix("clf__"): v for k, v in search.best_params_.items()},
-                    "sampler": type(sampler).__name__ if sampler else None,
-                    "search": search,
+                    "params": params,
+                    "sampler": sampler_name,
+                    "metrics": metrics,
+                    "mlflow_run_id": mlflow_run_id,
                 }
 
         history.models_evaluated = len(CANDIDATES)
         history.best_model_name = best["name"]
 
-        # Serve the bare classifier: samplers only act at fit time, and SHAP's
-        # tree/linear explainers need the estimator itself, not the pipeline.
-        fitted = best["search"].best_estimator_
-        model = fitted.named_steps["clf"] if isinstance(fitted, Pipeline) else fitted
-        model = with_background(model, X_train)
-        metrics = test_metrics(model, X_test, y_test)
+        metrics = best["metrics"]
         history.best_f1_score = metrics["f1_macro"]
         history.best_recall = metrics["recall"]
         history.best_auc_roc = metrics["auc_roc"]
@@ -222,18 +303,14 @@ def run_retrain():
             print(f"Could not score the active model ({e}); promoting the new one.")
         history.model_improved = improved
 
+        mlflow_run_id = best["mlflow_run_id"]
         if improved:
-            os.makedirs(RESULTS_DIR, exist_ok=True)
-            joblib.dump(model, os.path.join(RESULTS_DIR, f"best_model_{best['name']}.joblib"))
-
-            mlflow_run_id = None
             try:
-                mlflow_run_id = register_in_mlflow(
-                    model, best["name"], best["params"],
-                    {**metrics, "cv_f1_macro": best["cv_f1"]},
-                    run_name=f"register_{best['name']}_{run_id}",
-                )
+                if mlflow_run_id is None:
+                    raise RuntimeError("the candidate run was not logged")
+                register_in_mlflow(mlflow_run_id)
             except Exception as e:
+                mlflow_run_id = None
                 print(f"MLflow registration failed (model still active in app DB): {e}")
 
             activate_in_db(db, best["name"], mlflow_run_id or run_id, best["params"], metrics, best["sampler"])
@@ -241,6 +318,11 @@ def run_retrain():
             print(f"New model activated: {best['name']}")
         else:
             print("Keeping current model.")
+
+        try:
+            prune_runs()
+        except Exception as e:
+            print(f"MLflow pruning failed: {e}")
 
         history.status = "success"
         history.finished_at = datetime.utcnow()
@@ -260,4 +342,7 @@ def run_retrain():
 
 
 if __name__ == "__main__":
-    run_retrain()
+    try:
+        run_retrain()
+    except Exception:
+        sys.exit(1)  # non-zero so the scheduler (GitHub Actions) marks the run as failed

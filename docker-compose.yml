@@ -48,10 +48,11 @@ services:
     container_name: churn-api
     environment:
       DATABASE_URL: postgresql+psycopg2://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/churn_prediction
+      TRAINING_DATABASE_URL: postgresql+psycopg2://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/churn_training
       MLFLOW_TRACKING_URI: http://mlflow:5000
       ENVIRONMENT: development
       MODEL_THRESHOLD: "0.30"
-      ENABLE_SCHEDULER: "false"
+      RETRAIN_SERVICE_URL: http://retrainer:8001
     ports:
       - "8000:8000"
     volumes:
@@ -61,6 +62,27 @@ services:
         condition: service_healthy
       mlflow:
         condition: service_healthy
+
+  retrainer:
+    build:
+      context: ./backend
+      dockerfile: retrainer/Dockerfile
+    container_name: churn-retrainer
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/churn_prediction
+      TRAINING_DATABASE_URL: postgresql+psycopg2://${DB_USER:-user}:${DB_PASSWORD:-password}@postgres:5432/churn_training
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      ENVIRONMENT: development
+      MODEL_THRESHOLD: "0.30"
+      ENABLE_SCHEDULER: "true"
+      TOP_K_MODELS: ${TOP_K_MODELS:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+      api:
+        condition: service_started  # the api entrypoint runs migrations + training DB init
 
   dashboard:
     build: ./dashboard

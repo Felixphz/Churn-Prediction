@@ -1,6 +1,6 @@
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, Boolean, Numeric, DateTime, ForeignKey, Text, JSON
+    Column, Integer, String, Boolean, Numeric, DateTime, ForeignKey, Text, JSON, true
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -36,6 +36,9 @@ class Customer(Base):
     payment_method = Column(String(30), nullable=False)
     monthly_charges = Column(Numeric(10, 2), nullable=False)
     total_charges = Column(Numeric(10, 2))
+
+    # False once a churn outcome is confirmed: excluded from inference
+    active = Column(Boolean, nullable=False, default=True, server_default=true(), index=True)
 
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)

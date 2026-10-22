@@ -10,28 +10,33 @@ Usage (from repo root, with MLFLOW_TRACKING_URI pointing to the target server):
 import os
 import sys
 
-import joblib
+from sklearn.model_selection import cross_val_score
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.retrain import (
-    FINAL_MODEL_NAME, RESULTS_DIR, activate_in_db, final_model, load_data,
-    register_in_mlflow, test_metrics, with_background,
+    FINAL_MODEL_NAME, activate_in_db, cv_splitter, final_model, load_data,
+    log_model_run, register_in_mlflow, test_metrics, with_background,
 )
 
 
 def main():
-    X_train, y_train, X_test, y_test = load_data()
+    X_train, X_test, y_train, y_test = load_data()
     model = with_background(final_model().fit(X_train, y_train), X_train)
     metrics = test_metrics(model, X_test, y_test)
     params = {"C": model.C, "penalty": model.penalty, "solver": model.solver}
     print(f"{FINAL_MODEL_NAME}: " + ", ".join(f"{k}={v:.4f}" for k, v in metrics.items()))
 
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    joblib.dump(model, os.path.join(RESULTS_DIR, f"best_model_{FINAL_MODEL_NAME}.joblib"))
+    # CV F1-macro ranks the run alongside retrain candidates (top-K pruning)
+    cv_f1 = float(cross_val_score(final_model(), X_train, y_train, cv=cv_splitter(), scoring="f1_macro").mean())
 
-    run_id = register_in_mlflow(model, FINAL_MODEL_NAME, params, metrics,
-                                run_name=f"bootstrap_{FINAL_MODEL_NAME}")
+    run_id = log_model_run(
+        model, params,
+        {"cv_f1_macro": cv_f1, **{f"test_{k}": v for k, v in metrics.items()}},
+        run_name=f"bootstrap_{FINAL_MODEL_NAME}",
+        tags={"model_name": FINAL_MODEL_NAME, "sampler": "none"},
+    )
+    register_in_mlflow(run_id)
 
     try:
         from app.database import SessionLocal

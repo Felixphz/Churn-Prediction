@@ -38,6 +38,31 @@ EXPECTED_FEATURE_NAMES = [
 ]
 
 
+def customer_to_record(customer) -> dict:
+    """snake_case row (Customer or TrainingSample) -> notebook CapitalCase record."""
+    return {
+        "gender": customer.gender,
+        "SeniorCitizen": customer.senior_citizen,
+        "Partner": customer.partner,
+        "Dependents": customer.dependents,
+        "tenure": customer.tenure,
+        "PhoneService": customer.phone_service,
+        "MultipleLines": customer.multiple_lines,
+        "InternetService": customer.internet_service,
+        "OnlineSecurity": customer.online_security,
+        "OnlineBackup": customer.online_backup,
+        "DeviceProtection": customer.device_protection,
+        "TechSupport": customer.tech_support,
+        "StreamingTV": customer.streaming_tv,
+        "StreamingMovies": customer.streaming_movies,
+        "Contract": customer.contract,
+        "PaperlessBilling": customer.paperless_billing,
+        "PaymentMethod": customer.payment_method,
+        "MonthlyCharges": float(customer.monthly_charges),
+        "TotalCharges": float(customer.total_charges) if customer.total_charges else 0.0,
+    }
+
+
 def preprocess_customers(records: list[dict]) -> pd.DataFrame:
     """Transform raw customer rows to the 30-feature format expected by the model.
 

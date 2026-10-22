@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
-from app.routers import customers, predictions, pipeline, dashboard
+from app.routers import customers, predictions, pipeline, dashboard, outcomes
 
 settings = get_settings()
 
@@ -10,16 +10,8 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"Starting Churn Prediction API - {settings.ENVIRONMENT}")
-
-    # Start scheduler for monthly retrain
-    if settings.ENVIRONMENT != "test" and settings.ENABLE_SCHEDULER:
-        from app.utils.scheduler import start_scheduler
-        start_scheduler()
-
+    # The monthly retrain cron runs in the separate retrainer service
     yield
-
-    from app.utils.scheduler import stop_scheduler
-    stop_scheduler()
     print("Shutting down Churn Prediction API")
 
 
@@ -42,6 +34,7 @@ app.include_router(customers.router)
 app.include_router(predictions.router)
 app.include_router(pipeline.router)
 app.include_router(dashboard.router)
+app.include_router(outcomes.router)
 
 
 @app.get("/health")

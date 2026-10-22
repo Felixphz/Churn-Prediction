@@ -8,7 +8,7 @@ from app.models.customer import Customer
 from app.models.prediction import Prediction
 from app.models.model_registry import ModelRegistry
 from app.utils.model_predictor import predict_frame
-from app.utils.preprocessor import preprocess_customers
+from app.utils.preprocessor import customer_to_record, preprocess_customers
 
 settings = get_settings()
 
@@ -17,30 +17,6 @@ CHUNK_SIZE = 500
 # Estado de los batch en curso / terminados en este proceso (batch_run_id -> dict)
 BATCH_RUNS: dict[str, dict] = {}
 _runs_lock = threading.Lock()
-
-
-def _customer_data(customer: Customer) -> dict:
-    return {
-        "gender": customer.gender,
-        "SeniorCitizen": customer.senior_citizen,
-        "Partner": customer.partner,
-        "Dependents": customer.dependents,
-        "tenure": customer.tenure,
-        "PhoneService": customer.phone_service,
-        "MultipleLines": customer.multiple_lines,
-        "InternetService": customer.internet_service,
-        "OnlineSecurity": customer.online_security,
-        "OnlineBackup": customer.online_backup,
-        "DeviceProtection": customer.device_protection,
-        "TechSupport": customer.tech_support,
-        "StreamingTV": customer.streaming_tv,
-        "StreamingMovies": customer.streaming_movies,
-        "Contract": customer.contract,
-        "PaperlessBilling": customer.paperless_billing,
-        "PaymentMethod": customer.payment_method,
-        "MonthlyCharges": float(customer.monthly_charges),
-        "TotalCharges": float(customer.total_charges) if customer.total_charges else 0.0,
-    }
 
 
 def _update(batch_run_id: str, **fields):
@@ -53,7 +29,11 @@ def run_batch_predictions(batch_run_id: str, threshold: float = 0.3) -> dict:
     started_at = datetime.utcnow()
     db = SessionLocal()
     try:
-        customer_ids = [cid for (cid,) in db.query(Customer.id).order_by(Customer.id).all()]
+        # Only active customers: those with a confirmed churn are not scored again
+        customer_ids = [
+            cid for (cid,) in
+            db.query(Customer.id).filter(Customer.active == True).order_by(Customer.id).all()
+        ]
         total = len(customer_ids)
         _update(batch_run_id, total_customers=total)
 
@@ -71,7 +51,7 @@ def run_batch_predictions(batch_run_id: str, threshold: float = 0.3) -> dict:
                 rows, valid = [], []
                 for customer in customers:
                     try:
-                        rows.append(_customer_data(customer))
+                        rows.append(customer_to_record(customer))
                         valid.append(customer)
                     except Exception as e:
                         errors += 1

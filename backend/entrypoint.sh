@@ -14,5 +14,10 @@ else
     echo "Skipping seed (SEED_ON_STARTUP=false)"
 fi
 
+if [ -n "${TRAINING_DATABASE_URL}" ]; then
+    echo "Initializing training DB..."
+    python scripts/init_training_db.py
+fi
+
 echo "Starting API..."
 exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
