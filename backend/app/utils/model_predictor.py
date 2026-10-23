@@ -202,9 +202,11 @@ def predict_frame(X: pd.DataFrame, threshold: float = 0.3) -> list[dict]:
 
     results = []
     for prob, expl in zip(probs, explanations):
-        churn_prob = float(prob)
+        # Decide on the same rounded value that is returned and stored (Numeric(5,4)),
+        # so the label never contradicts the probability shown next to it
+        churn_prob = round(float(prob), 4)
         results.append({
-            "churn_probability": round(churn_prob, 4),
+            "churn_probability": churn_prob,
             "churn_predicted": bool(churn_prob >= threshold),
             "threshold": threshold,
             **expl,

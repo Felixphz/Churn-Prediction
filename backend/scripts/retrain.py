@@ -241,7 +241,8 @@ def active_model_cv_f1(X_train, y_train):
 
 
 def run_retrain():
-    db = SessionLocal()
+    # expire_on_commit=False: the returned history stays readable after the session closes
+    db = SessionLocal(expire_on_commit=False)
     run_id = str(uuid.uuid4())[:8]
     history = RetrainHistory(run_id=run_id, started_at=datetime.utcnow(), status="running")
     db.add(history)

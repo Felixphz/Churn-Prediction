@@ -13,7 +13,7 @@
 - Local API (no Docker): run Postgres, copy `backend/.env.example` → `backend/.env` (it uses `localhost`; root `.env.example` uses Docker hostnames `postgres`/`mlflow`), then from `backend/`: `alembic upgrade head && uvicorn app.main:app --port 8000`.
 - New migration from `backend/`: `alembic revision --autogenerate -m "<msg>"` (`alembic/env.py` reads `DATABASE_URL` from settings and imports all models). Alembic only covers the operational DB; the training DB schema is `create_all` in `init_training_db.py`.
 - `infra/postgres/init.sql` creates `churn_training` only on a fresh `pgdata` volume: `docker compose down -v` or create it by hand.
-- No tests, lint, typecheck, or CI exist (`pytest`/`httpx` are in `backend/requirements.txt` but there are zero test files).
+- Tests: from `backend/`, `pytest` (~45s; `pytest tests/unit` for the unit layer). No network: SQLite for both DBs and MLflow, `fake_model` fixture (small LogisticRegression on the 30 features) instead of the registry, mocks for GitHub/retrainer. `tests/conftest.py` sets the env **before** importing `app` (cached settings + engines created at import; also keeps `backend/.env` out) — keep it that way. Retrain tests swap `CANDIDATES` for a 1x1 grid and isolate MLflow names via the `mlflow_ns` fixture. CI: `.github/workflows/tests.yml` on every push to `main` and PR (Python 3.11, pinned requirements). No lint/typecheck yet.
 
 ## Gotchas — read before touching ML/DB code
 - `*.csv`, `*.joblib`, `*.pkl` are gitignored. Three git-absent files break things silently:
