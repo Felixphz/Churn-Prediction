@@ -126,10 +126,24 @@ def test_metrics(model, X_test, y_test) -> dict:
     }
 
 
+def use_experiment():
+    """Activate EXPERIMENT_NAME, restoring it if it was deleted from the UI.
+
+    MLflow refuses to log into a deleted experiment, which used to make every
+    candidate run fail silently.
+    """
+    mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
+    client = mlflow.MlflowClient()
+    experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
+    if experiment is not None and experiment.lifecycle_stage == "deleted":
+        client.restore_experiment(experiment.experiment_id)
+        print(f"MLflow: restored deleted experiment '{EXPERIMENT_NAME}' (id {experiment.experiment_id})")
+    mlflow.set_experiment(EXPERIMENT_NAME)
+
+
 def log_model_run(model, params: dict, metrics: dict, run_name: str, tags: dict | None = None) -> str:
     """Log params, metrics and the serving model as one MLflow run. Returns the run id."""
-    mlflow.set_tracking_uri(settings.MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(EXPERIMENT_NAME)
+    use_experiment()
     with mlflow.start_run(run_name=run_name, tags=tags) as run:
         mlflow.log_params(params)
         mlflow.log_metrics(metrics)
@@ -239,8 +253,12 @@ def run_retrain():
         history.train_samples = len(X_train)
         history.test_samples = len(X_test)
 
+        # Fail before the grid search if MLflow is unreachable: nothing could be saved
+        use_experiment()
+
         # 1. Select the best candidate by cross-validated F1-macro
         best = None
+        any_logged = False
         for name, (estimator, sampler, grid) in CANDIDATES.items():
             print(f"Training {name}...")
             if sampler is None:
@@ -270,6 +288,7 @@ def run_retrain():
                     run_name=f"retrain_{name}_{run_id}",
                     tags={"model_name": name, "sampler": sampler_name or "none", "retrain_run_id": run_id},
                 )
+                any_logged = True
             except Exception as e:
                 print(f"  MLflow logging failed: {e}")
 
@@ -285,6 +304,8 @@ def run_retrain():
 
         history.models_evaluated = len(CANDIDATES)
         history.best_model_name = best["name"]
+        if not any_logged:
+            raise RuntimeError("No candidate run could be logged to MLflow")
 
         metrics = best["metrics"]
         history.best_f1_score = metrics["f1_macro"]
@@ -305,16 +326,14 @@ def run_retrain():
 
         mlflow_run_id = best["mlflow_run_id"]
         if improved:
-            try:
-                if mlflow_run_id is None:
-                    raise RuntimeError("the candidate run was not logged")
-                register_in_mlflow(mlflow_run_id)
-            except Exception as e:
-                mlflow_run_id = None
-                print(f"MLflow registration failed (model still active in app DB): {e}")
+            # The API serves the registry alias: never mark a model active in the DB
+            # unless it was actually promoted in MLflow.
+            if mlflow_run_id is None:
+                raise RuntimeError(f"Best candidate {best['name']} was not logged to MLflow; cannot promote it")
+            register_in_mlflow(mlflow_run_id)
 
-            activate_in_db(db, best["name"], mlflow_run_id or run_id, best["params"], metrics, best["sampler"])
-            history.best_model_mlflow_run_id = mlflow_run_id or run_id
+            activate_in_db(db, best["name"], mlflow_run_id, best["params"], metrics, best["sampler"])
+            history.best_model_mlflow_run_id = mlflow_run_id
             print(f"New model activated: {best['name']}")
         else:
             print("Keeping current model.")
